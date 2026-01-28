@@ -5,15 +5,16 @@ import zipfile
 from pathlib import Path
 from datetime import datetime
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageDraw, ImageFont
 import gradio as gr
 
 
-# --- legg under constants / config ---
+# ---------------------------------------------------------
+# CSS
+# ---------------------------------------------------------
 HERE = Path(__file__).resolve().parent
 CSS_PATH = HERE / "theme_clean_2.css"
 CUSTOM_CSS = CSS_PATH.read_text(encoding="utf-8") if CSS_PATH.exists() else ""
-
 print("CSS loaded:", len(CUSTOM_CSS), "from", CSS_PATH)
 
 # ---------------------------------------------------------
@@ -22,12 +23,51 @@ print("CSS loaded:", len(CUSTOM_CSS), "from", CSS_PATH)
 JPEG_QUALITY = 80
 DPI = (300, 300)
 
-# Etsy constraints
 MAX_ZIP_SIZE_MB = 20
 MAX_ZIP_SIZE_BYTES = MAX_ZIP_SIZE_MB * 1024 * 1024
 
 APP_NAME = "SnapToSize"
 PPI = 300  # 300 DPI/PPI export
+
+# ---------------------------------------------------------
+# Paywall (v1: Pro code)
+# ---------------------------------------------------------
+PRO_CODE = os.getenv("PRO_CODE", "").strip()
+STRIPE_LINK = os.getenv("STRIPE_LINK", "").strip()
+
+DEMO_GROUPS = ["2x3"]          # free users only get this group
+WATERMARK_TEXT = "SNAPTOSIZE DEMO"
+
+
+def validate_pro_code(code: str):
+    code = (code or "").strip()
+    if not PRO_CODE:
+        return False, "PRO_CODE is not set on the server."
+    if code != PRO_CODE:
+        return False, "Invalid code."
+    return True, "✅ Pro unlocked."
+
+
+def add_watermark(im: Image.Image, text: str = WATERMARK_TEXT) -> Image.Image:
+    """
+    Simple watermark that doesn't need external fonts.
+    Keeps output valid JPG (RGB).
+    """
+    base = im.copy().convert("RGBA")
+    w, h = base.size
+
+    overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    font = ImageFont.load_default()
+
+    step = max(220, min(w, h) // 3)
+    for y in range(0, h, step):
+        for x in range(0, w, step):
+            draw.text((x, y), text, font=font, fill=(255, 255, 255, 70))
+
+    out = Image.alpha_composite(base, overlay).convert("RGB")
+    return out
+
 
 # ---------------------------------------------------------
 # Utilities
@@ -48,7 +88,8 @@ def resize_image(im: Image.Image, w: int, h: int) -> Image.Image:
 def safe_name(s: str) -> str:
     """Safe filename stub."""
     return (
-        s.replace(" ", "_")
+        str(s)
+        .replace(" ", "_")
         .replace("/", "_")
         .replace("\\", "_")
         .replace(":", "")
@@ -67,8 +108,8 @@ def ensure_under_etsy_limit(file_path: str):
             f"ZIP is too large for Etsy upload ({mb:.1f}MB > {MAX_ZIP_SIZE_MB}MB).\n\n"
             "Fix options:\n"
             "• Remove some size groups (generate fewer ZIPs)\n"
-            "• Lower JPEG quality (we can add a slider next)\n"
-            "• Some images compress worse (high noise/detail) — try a cleaner source"
+            "• Lower JPEG quality\n"
+            "• Some images compress worse (high noise/detail)"
         )
 
 
@@ -79,7 +120,7 @@ def make_run_dir() -> Path:
 
 
 # ---------------------------------------------------------
-# Presets (single source of truth)
+# Presets
 # ---------------------------------------------------------
 PRINT_SIZES = {
     "2x3": [(4, 6), (8, 12), (10, 15), (12, 18), (16, 24), (20, 30)],
@@ -105,7 +146,7 @@ GROUP_ORDER = ["2x3", "3x4", "4x5", "ISO", "EXTRAS"]
 
 
 # ---------------------------------------------------------
-# Size choice builder (used by Single Export + can be reused later)
+# Size choice builder (for Single Export)
 # ---------------------------------------------------------
 def _inch_to_px(x_in: float) -> int:
     return int(round(x_in * PPI))
@@ -116,58 +157,45 @@ def build_size_map(group: str, orientation: str):
     Returns:
       choices: list[str] dropdown labels
       lookup: dict[label] = (w_px, h_px, base_label_for_filename)
-
-    Orientation:
-      - "Portrait": use as-is
-      - "Landscape": swap w/h (including ISO)  <-- user chose A
     """
     orientation = (orientation or "").strip()
     if group not in PRINT_SIZES:
         return [], {}
 
     def fmt_in(x):
-        # Pretty inch formatting: 8.0 -> "8", 8.5 -> "8.5"
         try:
             xf = float(x)
         except Exception:
             return str(x)
         if abs(xf - round(xf)) < 1e-9:
             return str(int(round(xf)))
-        s = f"{xf}".rstrip("0").rstrip(".")
-        return s
+        return f"{xf}".rstrip("0").rstrip(".")
 
     choices = []
     lookup = {}
 
     for spec in PRINT_SIZES[group]:
-        # ISO: ("A4", 2480, 3508)
         if group == "ISO":
             label, w_px, h_px = spec
-
             if orientation == "Landscape":
                 w_px, h_px = h_px, w_px
-
             pretty = f"{label} ({w_px}×{h_px})"
             choices.append(pretty)
             lookup[pretty] = (int(w_px), int(h_px), label)
             continue
 
-        # Inch-based: (w_in, h_in) OR ("label", w_in, h_in)
         if isinstance(spec, tuple) and len(spec) == 3:
             _label, w_in, h_in = spec
         else:
             w_in, h_in = spec
 
-        # Build label that matches orientation
         if orientation == "Landscape":
             size_label = f"{fmt_in(h_in)}x{fmt_in(w_in)}"
         else:
             size_label = f"{fmt_in(w_in)}x{fmt_in(h_in)}"
 
-        # Convert inches to px (portrait base), then swap pixels if landscape
         w_px = _inch_to_px(float(w_in))
         h_px = _inch_to_px(float(h_in))
-
         if orientation == "Landscape":
             w_px, h_px = h_px, w_px
 
@@ -178,21 +206,22 @@ def build_size_map(group: str, orientation: str):
     return choices, lookup
 
 
-
 # ---------------------------------------------------------
-# Batch ZIP generator (v1 product behavior)
-# Stretch-only (preserve all artwork). No crop.
-# One ZIP per group. Etsy 20MB cap enforced.
-# Server-safe temp output.
+# Batch ZIP generator
 # ---------------------------------------------------------
-def generate_zip(image_path, groups):
+def generate_zip(image_path, groups, is_pro: bool):
     if not image_path:
         raise gr.Error("Upload an image first.")
     if not groups:
         raise gr.Error("Choose at least one group.")
 
-    im = normalize_image(Image.open(image_path))
+    # Demo gating
+    if not is_pro:
+        groups = [g for g in groups if g in DEMO_GROUPS]
+        if not groups:
+            raise gr.Error("Demo mode: only the 2x3 group is available. Unlock Pro for full export.")
 
+    im = normalize_image(Image.open(image_path))
     run_dir = make_run_dir()
     result_files = []
 
@@ -214,8 +243,10 @@ def generate_zip(image_path, groups):
                     h = int(round(float(h_in) * PPI))
 
                 img = resize_image(im, w, h)
-                filename = f"{safe_name(label)}_{w}x{h}.jpg"
+                if not is_pro:
+                    img = add_watermark(img)
 
+                filename = f"{safe_name(label)}_{w}x{h}.jpg"
                 buf = io.BytesIO()
                 img.save(buf, "JPEG", quality=JPEG_QUALITY, dpi=DPI)
                 buf.seek(0)
@@ -232,16 +263,18 @@ def generate_zip(image_path, groups):
 
 
 # ---------------------------------------------------------
-# Single size export (Advanced)
-# Stretch-only, driven by PRINT_SIZES
+# Single size export (Pro only)
 # ---------------------------------------------------------
-def single_export(image_pil, orientation, group, size_choice):
+def single_export(image_pil, orientation, group, size_choice, is_pro: bool):
     if image_pil is None:
         raise gr.Error("Upload an image first.")
     if not group:
         raise gr.Error("Choose a group.")
     if not size_choice:
         raise gr.Error("Choose a size.")
+
+    if not is_pro:
+        raise gr.Error("Demo mode: Single Export is Pro only. Unlock Pro to use this feature.")
 
     choices, lookup = build_size_map(group, orientation)
     if size_choice not in lookup:
@@ -279,48 +312,45 @@ def clear_all_groups():
 # ---------------------------------------------------------
 # UI
 # ---------------------------------------------------------
-with gr.Blocks(title=APP_NAME, css=CUSTOM_CSS, elem_id="app-root") as app:
-
+with gr.Blocks(title=APP_NAME, elem_id="app-root") as app:
+    is_pro = gr.State(False)
 
     gr.Markdown(
         """
 # **SnapToSize**
-
 Fast, clean, high-quality print preparation — without the guesswork.
 
-• **Batch ZIP** → generate Etsy-ready print-size ZIPs from a single image  
-• **Single Size Export (Advanced)** → export one specific size from the same presets  
-• **Output**: JPEG, quality 80, 300 DPI  
-• Supports: **JPG, PNG, WEBP**
+**Demo mode (free):** watermarked + only 2x3 exports  
+**Pro:** no watermark + all sizes + advanced export
         """,
         elem_id="hero-text",
     )
 
+    # Upgrade + Unlock
+    with gr.Accordion("Unlock Pro", open=True):
+        buy_line = f"**Buy Pro:** {STRIPE_LINK}" if STRIPE_LINK else "**Buy Pro:** (set STRIPE_LINK in Space Secrets)"
+        gr.Markdown(buy_line)
+
+        pro_code = gr.Textbox(label="Pro code", placeholder="Paste your Pro code here")
+        unlock_btn = gr.Button("Unlock")
+        unlock_status = gr.Markdown()
+
+        unlock_btn.click(
+            fn=validate_pro_code,
+            inputs=[pro_code],
+            outputs=[is_pro, unlock_status],
+        )
+
     # ==================== BATCH ZIP ====================
     with gr.Tab("Batch ZIP", elem_id="tab-batch"):
-        gr.Markdown(
-            "Create a complete print set from **one image** and download it as multiple ZIPs (one per group).",
-            elem_classes=["tab-description"],
-        )
-        gr.Markdown(
-            "✅ **Smart Resize (default):** preserves all artwork. Minor proportional scaling may occur to match print ratios.",
-            elem_classes=["tab-description"],
-        )
         gr.Markdown(
             f"⚠️ Etsy limit: **{MAX_ZIP_SIZE_MB}MB per ZIP** and **max 5 files** per listing.",
             elem_classes=["tab-description"],
         )
 
         with gr.Row(elem_id="batch-row"):
-            input_img = gr.Image(
-                type="filepath",
-                label="Upload image",
-                elem_id="batch-input-image",
-            )
-            output_zip = gr.Files(
-                label="Download ZIPs",
-                elem_id="batch-output-zip",
-            )
+            input_img = gr.Image(type="filepath", label="Upload image", elem_id="batch-input-image")
+            output_zip = gr.Files(label="Download ZIPs", elem_id="batch-output-zip")
 
         group_select = gr.CheckboxGroup(
             GROUP_ORDER,
@@ -329,56 +359,30 @@ Fast, clean, high-quality print preparation — without the guesswork.
         )
 
         with gr.Row(elem_id="batch-actions-row"):
-            gr.Button("Select all groups", elem_classes=["secondary"]).click(
-                select_all_groups, [], group_select
-            )
-            gr.Button("Clear selection", elem_classes=["secondary"]).click(
-                clear_all_groups, [], group_select
-            )
+            gr.Button("Select all groups", elem_classes=["secondary"]).click(select_all_groups, [], group_select)
+            gr.Button("Clear selection", elem_classes=["secondary"]).click(clear_all_groups, [], group_select)
 
         gr.Button("Generate ZIPs", elem_id="batch-generate-btn").click(
-            generate_zip, [input_img, group_select], output_zip
+            generate_zip,
+            inputs=[input_img, group_select, is_pro],
+            outputs=output_zip,
         )
 
     # ==================== SINGLE EXPORT (ADVANCED) ====================
     with gr.Tab("Single Size Export (Advanced)", elem_id="tab-single-export"):
-
         gr.Markdown(
             "## Single Size Export (Advanced)\n"
             "_Export one specific print size from the same presets used in Batch ZIP._",
             elem_id="single-export-header",
         )
 
-        gr.Markdown(
-            "✅ Uses **Smart Resize** (no cropping). Choose **Landscape** to swap dimensions (including ISO).",
-            elem_classes=["tab-description"],
-        )
-
         with gr.Row(elem_id="single-row"):
-            single_img = gr.Image(
-                type="pil",
-                label="Upload image",
-                elem_id="single-input-image",
-            )
-            single_out = gr.File(
-                label="Download JPG",
-                elem_id="single-output-file",
-            )
+            single_img = gr.Image(type="pil", label="Upload image", elem_id="single-input-image")
+            single_out = gr.File(label="Download JPG", elem_id="single-output-file")
 
         with gr.Row(elem_id="single-controls-row"):
-            orientation = gr.Radio(
-                ["Portrait", "Landscape"],
-                value="Portrait",
-                label="Orientation",
-                elem_id="single-orientation",
-            )
-
-            single_group = gr.Dropdown(
-                GROUP_ORDER,
-                value="4x5",
-                label="Ratio family",
-                elem_id="single-group",
-            )
+            orientation = gr.Radio(["Portrait", "Landscape"], value="Portrait", label="Orientation", elem_id="single-orientation")
+            single_group = gr.Dropdown(GROUP_ORDER, value="4x5", label="Ratio family", elem_id="single-group")
 
             initial_choices, _ = build_size_map("4x5", "Portrait")
             single_size = gr.Dropdown(
@@ -388,21 +392,12 @@ Fast, clean, high-quality print preparation — without the guesswork.
                 elem_id="single-size",
             )
 
-        # MUST be inside Blocks/Tab context
-        orientation.change(
-            update_single_size_choices,
-            inputs=[orientation, single_group],
-            outputs=single_size,
-        )
-        single_group.change(
-            update_single_size_choices,
-            inputs=[orientation, single_group],
-            outputs=single_size,
-        )
+        orientation.change(update_single_size_choices, inputs=[orientation, single_group], outputs=single_size)
+        single_group.change(update_single_size_choices, inputs=[orientation, single_group], outputs=single_size)
 
         gr.Button("Export JPG", elem_id="single-export-btn").click(
             single_export,
-            inputs=[single_img, orientation, single_group, single_size],
+            inputs=[single_img, orientation, single_group, single_size, is_pro],
             outputs=single_out,
         )
 
@@ -410,4 +405,7 @@ Fast, clean, high-quality print preparation — without the guesswork.
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "7860"))
     host = "0.0.0.0" if os.getenv("SPACE_ID") else "127.0.0.1"
-    app.launch(server_name=host, server_port=port)
+
+    # Gradio 6: pass CSS to launch() (not Blocks)
+    app.launch(server_name=host, server_port=port, css=CUSTOM_CSS)
+
