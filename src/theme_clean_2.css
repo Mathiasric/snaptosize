@@ -1,0 +1,143 @@
+/* ---------------------------------------------------------
+   LEVEL 2 — Premium macOS-like dark UI
+   Clean. Minimal. High-end.
+   Tabs unchanged (default Gradio)
+--------------------------------------------------------- */
+
+:root {
+    --bg: #0d0d0e;
+    --bg-alt: #161618;
+    --card: #1c1c1e;
+    --card-glass: rgba(32,32,34,0.55);
+
+    --text: #e7e7e7;
+    --text-soft: #b7b7b7;
+
+    --accent: #f28a3a;
+    --accent-hover: #d67427;
+
+    --border: #2a2a2c;
+    --radius: 10px;
+
+    --blur: 16px;
+    --transition: 0.20s ease;
+}
+
+/* ---------------------------------------------------------
+   GLOBAL
+--------------------------------------------------------- */
+body, .gradio-container {
+    background: var(--bg) !important;
+    color: var(--text) !important;
+    font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+* {
+    transition: background var(--transition),
+                color var(--transition),
+                border-color var(--transition),
+                box-shadow var(--transition);
+}
+
+.gradio-container * {
+    box-shadow: none !important;
+}
+
+/* ---------------------------------------------------------
+   HERO (glass)
+--------------------------------------------------------- */
+#hero-text {
+    background: var(--card-glass) !important;
+    backdrop-filter: blur(var(--blur));
+    border: 1px solid rgba(255,255,255,0.05);
+    border-radius: var(--radius);
+    padding: 22px !important;
+    margin-bottom: 24px !important;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+}
+
+#hero-text h1 {
+    font-weight: 700;
+    margin-bottom: 6px !important;
+}
+
+#hero-text p,
+#hero-text li {
+    color: var(--text-soft);
+}
+
+/* ---------------------------------------------------------
+   PANELS
+--------------------------------------------------------- */
+.gr-panel,
+.gr-box,
+.gr-group {
+    background: var(--card) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius);
+    padding: 12px !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+}
+
+/* ---------------------------------------------------------
+   IMAGE ZONES
+--------------------------------------------------------- */
+.gr-image,
+.image-container,
+.image-preview {
+    background: var(--bg-alt) !important;
+    border: 2px dashed var(--border) !important;
+    border-radius: var(--radius) !important;
+}
+
+.gr-image:hover {
+    border-color: var(--accent) !important;
+}
+
+/* ---------------------------------------------------------
+   INPUTS
+--------------------------------------------------------- */
+select {
+    background: var(--bg-alt) !important;
+    color: var(--text) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius) !important;
+}
+.checkbox-group {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+
+.checkbox-group label {
+    background: var(--bg-alt) !important;
+    border: 1px solid var(--border) !important;
+    padding: 8px 16px !important;
+    border-radius: var(--radius) !important;
+    color: var(--text-soft);
+}
+
+.checkbox-group input:checked + label {
+    background: var(--accent) !important;
+    color: #000 !important;
+    border-color: var(--accent) !important;
+}
+
+
+/* ---------------------------------------------------------
+   DESCRIPTIONS
+--------------------------------------------------------- */
+.tab-description {
+    color: var(--text-soft) !important;
+    margin-bottom: 14px !important;
+}
+
+/* ---------------------------------------------------------
+   RESPONSIVE
+--------------------------------------------------------- */
+@media (max-width: 768px) {
+    #hero-text {
+        padding: 16px !important;
+    }
+}
