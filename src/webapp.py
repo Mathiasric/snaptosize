@@ -6,7 +6,6 @@ from pathlib import Path
 from datetime import datetime
 
 import base64, hashlib, hmac, json, time
-import stripe
 
 from PIL import Image, ImageOps, ImageDraw, ImageFont
 import gradio as gr
@@ -35,11 +34,7 @@ PPI = 300  # 300 DPI/PPI export
 # ---------------------------------------------------------
 # Paywall (v1: Pro code)
 # ---------------------------------------------------------
-import base64, hashlib, hmac, json, time
-import stripe
-
 STRIPE_LINK = os.getenv("STRIPE_LINK", "").strip()
-STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "").strip()
 PRO_TOKEN_SECRET = os.getenv("PRO_TOKEN_SECRET", "").strip()
 
 DEMO_GROUPS = ["2x3"]
