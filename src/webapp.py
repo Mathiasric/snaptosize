@@ -72,7 +72,7 @@ def verify_pro_token(email: str, token: str):
             return False, "Invalid token signature."
 
         payload = json.loads(raw.decode())
-        if payload["email"] != email:
+        if payload["email"] not in (email, "*"):
             return False, "Token does not match email."
         if payload["exp"] < time.time():
             return False, "Token expired."
