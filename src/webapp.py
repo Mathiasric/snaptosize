@@ -5,7 +5,8 @@ import zipfile
 from pathlib import Path
 from datetime import datetime
 
-import base64, hashlib, hmac, json, time
+import stripe
+import time
 
 from PIL import Image, ImageOps, ImageDraw, ImageFont
 import gradio as gr
@@ -32,54 +33,52 @@ APP_NAME = "SnapToSize"
 PPI = 300  # 300 DPI/PPI export
 
 # ---------------------------------------------------------
-# Paywall (v1: Pro code)
+# Paywall (Stripe = source of truth)
 # ---------------------------------------------------------
-STRIPE_LINK = os.getenv("STRIPE_LINK", "").strip()
-PRO_TOKEN_SECRET = os.getenv("PRO_TOKEN_SECRET", "").strip()
+STRIPE_LINK = os.getenv("STRIPE_LINK", "").strip()  # your monthly payment link (for UI)
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "").strip()
+if not STRIPE_SECRET_KEY:
+    raise RuntimeError("STRIPE_SECRET_KEY is not set. Add it as an environment variable.")
+
+stripe.api_key = STRIPE_SECRET_KEY
 
 DEMO_GROUPS = ["2x3"]
 WATERMARK_TEXT = "SNAPTOSIZE DEMO"
 
+# simple cache so we don't hit Stripe constantly
+_PRO_CACHE = {}
+_CACHE_TTL = 600  # seconds (10 min)
 
-def _b64url(b: bytes) -> str:
-    return base64.urlsafe_b64encode(b).decode().rstrip("=")
+def stripe_is_pro(email: str):
+    email = (email or "").strip().lower()
+    if "@" not in email:
+        return False, "Enter the email you used at checkout."
 
+    now = time.time()
+    cached = _PRO_CACHE.get(email)
+    if cached and (now - cached["ts"]) < _CACHE_TTL:
+        return cached["ok"], cached["msg"]
 
-def _sign(msg: bytes) -> str:
-    return _b64url(
-        hmac.new(PRO_TOKEN_SECRET.encode(), msg, hashlib.sha256).digest()
-    )
+    # Find customers by email
+    customers = stripe.Customer.list(email=email, limit=5).data
+    if not customers:
+        msg = "❌ No Stripe customer found for this email."
+        _PRO_CACHE[email] = {"ok": False, "msg": msg, "ts": now}
+        return False, msg
 
+    # If ANY subscription is active/trialing → PRO
+    for c in customers:
+        subs = stripe.Subscription.list(customer=c.id, status="all", limit=20).data
+        for s in subs:
+            if s.status in ("active", "trialing"):
+                msg = "✅ Pro unlocked (active subscription)."
+                _PRO_CACHE[email] = {"ok": True, "msg": msg, "ts": now}
+                return True, msg
 
-def issue_pro_token(email: str, ttl_days: int = 365) -> str:
-    payload = {
-        "email": email.strip().lower(),
-        "exp": int(time.time()) + ttl_days * 86400,
-        "v": 1,
-    }
-    raw = json.dumps(payload, separators=(",", ":")).encode()
-    sig = _sign(raw)
-    return f"{_b64url(raw)}.{sig}"
+    msg = "❌ No active subscription found."
+    _PRO_CACHE[email] = {"ok": False, "msg": msg, "ts": now}
+    return False, msg
 
-
-def verify_pro_token(email: str, token: str):
-    try:
-        email = email.strip().lower()
-        p64, sig = token.strip().split(".", 1)
-        raw = base64.urlsafe_b64decode(p64 + "===")
-
-        if _sign(raw) != sig:
-            return False, "Invalid token signature."
-
-        payload = json.loads(raw.decode())
-        if payload["email"] not in (email, "*"):
-            return False, "Token does not match email."
-        if payload["exp"] < time.time():
-            return False, "Token expired."
-
-        return True, "✅ Pro unlocked."
-    except Exception:
-        return False, "Invalid token."
 
 def add_watermark(im: Image.Image, text: str = WATERMARK_TEXT) -> Image.Image:
     """
@@ -349,49 +348,70 @@ with gr.Blocks(title=APP_NAME, elem_id="app-root") as app:
     is_pro = gr.State(False)
 
     gr.Markdown(
-        """
-# **SnapToSize**
+        f"""
+# **{APP_NAME}**
 Fast, clean, high-quality print preparation — without the guesswork.
 
-**Demo mode (free):** watermarked + only 2x3 exports  
-**Pro:** no watermark + all sizes + advanced export
+### Free (Demo)
+- Watermarked exports  
+- Only **{', '.join(DEMO_GROUPS)}** group
+
+### Pro — $12 / month
+- No watermark  
+- All print sizes  
+- Advanced export  
+- Cancel anytime
         """,
         elem_id="hero-text",
     )
 
-    # Upgrade + Unlock
-      # Upgrade + Unlock
-    with gr.Accordion("Unlock Pro", open=True):
+    # ==================== UPGRADE + UNLOCK ====================
+  # ==================== UPGRADE + UNLOCK ====================
+with gr.Accordion("Unlock Pro", open=True):
+    if STRIPE_LINK:
         gr.Markdown(
-            f"**Demo mode (free):** watermarked + only {', '.join(DEMO_GROUPS)} exports\n\n"
-            f"**Pro:** no watermark + all sizes + advanced export"
+            f"""
+**Pro — $12/month**  
+Unlimited exports · All sizes · No watermark  
+Cancel anytime.
+
+👉 **Subscribe here:** {STRIPE_LINK}
+
+### How Pro access works
+1) Subscribe via Stripe  
+2) You’ll receive an email with access details  
+3) Enter the email you used at checkout to unlock Pro  
+
+_Pro access remains active while your subscription is active.  
+If the subscription ends, the app automatically reverts to Demo mode._
+            """
+        )
+    else:
+        gr.Markdown(
+            """
+⚠️ Stripe link is not set.
+
+Set the `STRIPE_LINK` environment variable to your Stripe subscription payment link.
+            """
         )
 
-        if STRIPE_LINK:
-            gr.Markdown(f"**Buy Pro:** {STRIPE_LINK}")
+    email_in = gr.Textbox(
+        label="Email used at checkout",
+        placeholder="you@example.com",
+    )
 
-        email_in = gr.Textbox(
-            label="Email used at checkout",
-            placeholder="you@example.com",
-        )
-        token_in = gr.Textbox(
-            label="Pro token",
-            placeholder="Paste your Pro token here",
-            type="password",
-        )
-        unlock_btn = gr.Button("Unlock")
-        unlock_status = gr.Markdown()
+    check_btn = gr.Button("Check subscription")
+    unlock_status = gr.Markdown("")
 
-        def unlock(email, token):
-            ok, msg = verify_pro_token(email, token)
-            return ok, msg
+    def unlock(email):
+        ok, msg = stripe_is_pro(email)
+        return ok, msg
 
-        unlock_btn.click(
-            fn=unlock,
-            inputs=[email_in, token_in],
-            outputs=[is_pro, unlock_status],
-        )
-
+    check_btn.click(
+        fn=unlock,
+        inputs=[email_in],
+        outputs=[is_pro, unlock_status],
+    )
 
     # ==================== BATCH ZIP ====================
     with gr.Tab("Batch ZIP", elem_id="tab-batch"):
