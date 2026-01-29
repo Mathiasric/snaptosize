@@ -5,6 +5,9 @@ import zipfile
 from pathlib import Path
 from datetime import datetime
 
+import base64, hashlib, hmac, json, time
+import stripe
+
 from PIL import Image, ImageOps, ImageDraw, ImageFont
 import gradio as gr
 
@@ -32,21 +35,56 @@ PPI = 300  # 300 DPI/PPI export
 # ---------------------------------------------------------
 # Paywall (v1: Pro code)
 # ---------------------------------------------------------
-PRO_CODE = os.getenv("PRO_CODE", "").strip()
-STRIPE_LINK = os.getenv("STRIPE_LINK", "").strip()
+import base64, hashlib, hmac, json, time
+import stripe
 
-DEMO_GROUPS = ["2x3"]          # free users only get this group
+STRIPE_LINK = os.getenv("STRIPE_LINK", "").strip()
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "").strip()
+PRO_TOKEN_SECRET = os.getenv("PRO_TOKEN_SECRET", "").strip()
+
+DEMO_GROUPS = ["2x3"]
 WATERMARK_TEXT = "SNAPTOSIZE DEMO"
 
 
-def validate_pro_code(code: str):
-    code = (code or "").strip()
-    if not PRO_CODE:
-        return False, "PRO_CODE is not set on the server."
-    if code != PRO_CODE:
-        return False, "Invalid code."
-    return True, "✅ Pro unlocked."
+def _b64url(b: bytes) -> str:
+    return base64.urlsafe_b64encode(b).decode().rstrip("=")
 
+
+def _sign(msg: bytes) -> str:
+    return _b64url(
+        hmac.new(PRO_TOKEN_SECRET.encode(), msg, hashlib.sha256).digest()
+    )
+
+
+def issue_pro_token(email: str, ttl_days: int = 365) -> str:
+    payload = {
+        "email": email.strip().lower(),
+        "exp": int(time.time()) + ttl_days * 86400,
+        "v": 1,
+    }
+    raw = json.dumps(payload, separators=(",", ":")).encode()
+    sig = _sign(raw)
+    return f"{_b64url(raw)}.{sig}"
+
+
+def verify_pro_token(email: str, token: str):
+    try:
+        email = email.strip().lower()
+        p64, sig = token.strip().split(".", 1)
+        raw = base64.urlsafe_b64decode(p64 + "===")
+
+        if _sign(raw) != sig:
+            return False, "Invalid token signature."
+
+        payload = json.loads(raw.decode())
+        if payload["email"] != email:
+            return False, "Token does not match email."
+        if payload["exp"] < time.time():
+            return False, "Token expired."
+
+        return True, "✅ Pro unlocked."
+    except Exception:
+        return False, "Invalid token."
 
 def add_watermark(im: Image.Image, text: str = WATERMARK_TEXT) -> Image.Image:
     """
@@ -327,19 +365,38 @@ Fast, clean, high-quality print preparation — without the guesswork.
     )
 
     # Upgrade + Unlock
+      # Upgrade + Unlock
     with gr.Accordion("Unlock Pro", open=True):
-        buy_line = f"**Buy Pro:** {STRIPE_LINK}" if STRIPE_LINK else "**Buy Pro:** (set STRIPE_LINK in Space Secrets)"
-        gr.Markdown(buy_line)
+        gr.Markdown(
+            f"**Demo mode (free):** watermarked + only {', '.join(DEMO_GROUPS)} exports\n\n"
+            f"**Pro:** no watermark + all sizes + advanced export"
+        )
 
-        pro_code = gr.Textbox(label="Pro code", placeholder="Paste your Pro code here")
+        if STRIPE_LINK:
+            gr.Markdown(f"**Buy Pro:** {STRIPE_LINK}")
+
+        email_in = gr.Textbox(
+            label="Email used at checkout",
+            placeholder="you@example.com",
+        )
+        token_in = gr.Textbox(
+            label="Pro token",
+            placeholder="Paste your Pro token here",
+            type="password",
+        )
         unlock_btn = gr.Button("Unlock")
         unlock_status = gr.Markdown()
 
+        def unlock(email, token):
+            ok, msg = verify_pro_token(email, token)
+            return ok, msg
+
         unlock_btn.click(
-            fn=validate_pro_code,
-            inputs=[pro_code],
+            fn=unlock,
+            inputs=[email_in, token_in],
             outputs=[is_pro, unlock_status],
         )
+
 
     # ==================== BATCH ZIP ====================
     with gr.Tab("Batch ZIP", elem_id="tab-batch"):
