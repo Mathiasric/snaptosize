@@ -81,6 +81,41 @@ def stripe_is_pro(email: str):
     _PRO_CACHE[email] = {"ok": False, "msg": msg, "ts": now}
     return False, msg
 
+def stripe_unlock_from_session(session_id: str):
+    """
+    Auto-unlock after Stripe redirect: ?session_id=cs_...
+    Returns (ok: bool, msg: str)
+    """
+    session_id = (session_id or "").strip()
+    if not session_id:
+        return False, ""
+
+    try:
+        session = stripe.checkout.Session.retrieve(
+            session_id,
+            expand=["subscription", "customer", "customer_details"],
+        )
+
+        # Must be paid
+        if getattr(session, "payment_status", None) != "paid":
+            return False, "Payment not completed yet."
+
+        # If subscription exists, ensure it's active/trialing
+        sub = getattr(session, "subscription", None)
+        if sub:
+            sub_status = getattr(sub, "status", None)
+            if sub_status not in ("active", "trialing"):
+                return False, f"Subscription not active ({sub_status})."
+
+        email = None
+        cd = getattr(session, "customer_details", None)
+        if cd and getattr(cd, "email", None):
+            email = cd.email
+
+        return True, f"✅ Pro unlocked{f' for {email}' if email else ''}."
+    except Exception as e:
+        return False, f"Could not verify checkout. ({type(e).__name__})"
+
 
 def add_watermark(im: Image.Image, text: str = WATERMARK_TEXT) -> Image.Image:
     """
@@ -366,11 +401,13 @@ Fast, clean, high-quality print preparation — without the guesswork.
 - All print sizes  
 - Advanced export  
 - Cancel anytime
+
         """,
         elem_id="hero-text",
     )
 
     # ==================== UPGRADE + UNLOCK ====================
+      # ==================== UPGRADE + UNLOCK ====================
     with gr.Accordion("Unlock Pro", open=True):
         gr.Markdown("### Choose a plan")
 
@@ -389,12 +426,13 @@ Fast, clean, high-quality print preparation — without the guesswork.
 
         gr.Markdown(
             """
-### Unlock steps (no login)
-1) Subscribe in Stripe (you’ll get a receipt email)  
-2) Open the app and enter the **same checkout email**  
-3) If your subscription is active, Pro unlocks instantly  
+### Auto-unlock after purchase (recommended)
+After checkout, you’ll be redirected back here and Pro unlocks automatically.
 
-_Pro stays active while your subscription is active._
+### Manual unlock (fallback)
+Enter the **same email you used at checkout** and click Unlock.
+
+_(Stripe emails you a receipt — not access details.)_
             """
         )
 
@@ -414,6 +452,27 @@ _Pro stays active while your subscription is active._
             fn=unlock,
             inputs=[email_in],
             outputs=[is_pro, unlock_status],
+        )
+
+        # Auto-unlock via Stripe redirect: ?session_id=cs_...
+        def auto_unlock(request: gr.Request):
+            session_id = None
+            try:
+                session_id = request.query_params.get("session_id")
+            except Exception:
+                session_id = None
+
+            if not session_id:
+                return False, ""
+
+            ok, msg = stripe_unlock_from_session(session_id)
+            return ok, msg
+
+        app.load(
+            fn=auto_unlock,
+            inputs=None,
+            outputs=[is_pro, unlock_status],
+            queue=False,
         )
 
     # ==================== BATCH ZIP ====================
