@@ -423,7 +423,11 @@ def clear_all_groups():
 # ---------------------------------------------------------
 # UI
 # ---------------------------------------------------------
+def render_pro_badge(ok: bool) -> str:
+    return "🟣 **Pro active** — unlimited exports enabled." if ok else ""
+
 with gr.Blocks(title=APP_NAME, elem_id="app-root") as app:
+    pro_badge = gr.Markdown("", elem_id="pro-badge")
     is_pro = gr.State(False)
 
     gr.Markdown(
@@ -447,6 +451,7 @@ Fast, clean, high-quality print preparation — without the guesswork.
         """,
         elem_id="hero-text",
     )
+
     # ==================== UPGRADE + UNLOCK ====================
     with gr.Accordion("Unlock Pro", open=False):
         gr.Markdown("### Choose a plan")
@@ -478,8 +483,6 @@ Paste the email you used at checkout and click **Unlock Pro**.
         check_btn = gr.Button("Unlock Pro", elem_id="unlock-btn")
 
         unlock_status = gr.Markdown("")
-        unlock_status = gr.Markdown("🟣 **Pro unlocked** — enjoy unlimited exports.")
-
 
         preload_js = gr.HTML(_preload_and_autounlock_script(), elem_id="preload-js")
         persist_js = gr.HTML("", elem_id="persist-js")
@@ -488,12 +491,13 @@ Paste the email you used at checkout and click **Unlock Pro**.
         def unlock(email):
             ok, msg = stripe_is_pro(email)
             js = _persist_email_script(email) if ok else ""
-            return ok, msg
+            badge = render_pro_badge(ok)
+            return ok, msg, js, badge
 
         check_btn.click(
             fn=unlock,
             inputs=[email_in],
-            outputs=[is_pro, unlock_status, persist_js],
+            outputs=[is_pro, unlock_status, persist_js, pro_badge],
         )
 
     # Auto-unlock via Stripe redirect: ?session_id=cs_...
@@ -514,13 +518,14 @@ Paste the email you used at checkout and click **Unlock Pro**.
 
         ok, msg, email = stripe_unlock_from_session(session_id)
         js = _persist_email_script(email) if ok else ""
-        return ok, (msg if ok else ""), js
+        badge = render_pro_badge(ok)
+        return ok, (msg if ok else ""), js, badge
 
 
     app.load(
         fn=auto_unlock,
         inputs=None,
-        outputs=[is_pro, unlock_status, persist_js],
+        outputs=[is_pro, unlock_status, persist_js, pro_badge],
         queue=False,
     )
 
