@@ -51,6 +51,10 @@ WATERMARK_TEXT = "SNAPTOSIZE DEMO"
 _PRO_CACHE = {}
 _CACHE_TTL = 600  # seconds (10 min)
 
+_FREE_IP_LAST = {}
+_FREE_COOLDOWN_SECONDS = 24 * 60 * 60
+
+
 def stripe_is_pro(email: str):
     email = (email or "").strip().lower()
     if "@" not in email:
@@ -113,7 +117,6 @@ def stripe_unlock_from_session(session_id: str):
         return False, f"Could not verify checkout. ({type(e).__name__})", ""
 
 
-
 def add_watermark(im: Image.Image, text: str = WATERMARK_TEXT) -> Image.Image:
     """
     Simple watermark that doesn't need external fonts.
@@ -150,15 +153,25 @@ try {{
 
 
 def _preload_and_autounlock_script() -> str:
-    # This runs on page load in the browser
+    # Runs on page load in the browser
     return """
 <script>
 (function(){
   try {
     const params = new URLSearchParams(window.location.search);
-    // If coming from Stripe redirect, let server auto-unlock handle it.
+
+    // If coming from Stripe redirect, let server-side auto_unlock handle it.
     if (params.get('session_id')) return;
 
+    // 1) Always load "free export used" timestamp into hidden Gradio input
+    const usedAt = localStorage.getItem('snaptosize_free_used_at') || "";
+    const freeInput = document.querySelector('#free-state input, #free-state textarea');
+    if (freeInput && !freeInput.value) {
+      freeInput.value = usedAt;
+      freeInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    // 2) If we have a stored checkout email, preload it and try auto-unlock
     const email = localStorage.getItem('snaptosize_email');
     if (!email) return;
 
@@ -173,6 +186,7 @@ def _preload_and_autounlock_script() -> str:
       const btn = document.querySelector('#unlock-btn button');
       if (btn) btn.click();
     }, 600);
+
   } catch(e) {}
 })();
 </script>
@@ -318,21 +332,41 @@ def build_size_map(group: str, orientation: str):
 # ---------------------------------------------------------
 # Batch ZIP generator
 # ---------------------------------------------------------
-def generate_zip(image_path, groups, is_pro: bool):
+def generate_zip(image_path, groups, is_pro: bool, free_used_at: str, request: gr.Request):
     if not image_path:
         raise gr.Error("Upload an image first.")
     if not groups:
         raise gr.Error("Choose at least one group.")
 
-    # Demo gating
+    # ONE FREE EXPORT (watermarked) per 24h
     if not is_pro:
-        groups = [g for g in groups if g in DEMO_GROUPS]
-        if not groups:
-            raise gr.Error("Demo mode: only the 2x3 group is available. Unlock Pro for full export.")
+        now = time.time()
+
+        # localStorage timestamp check
+        try:
+            used_ts = float(free_used_at) if free_used_at else 0.0
+        except Exception:
+            used_ts = 0.0
+
+        if used_ts and (now - used_ts) < _FREE_COOLDOWN_SECONDS:
+            raise gr.Error("You’ve used your free export. Upgrade to remove watermark and unlock unlimited exports.")
+
+        # IP cooldown (best effort anti-incognito)
+        ip = None
+        try:
+            ip = request.client.host
+        except Exception:
+            ip = None
+
+        if ip:
+            last = _FREE_IP_LAST.get(ip, 0.0)
+            if last and (now - last) < _FREE_COOLDOWN_SECONDS:
+                raise gr.Error("Free export already used on this network. Upgrade to unlock unlimited exports.")
 
     im = normalize_image(Image.open(image_path))
     run_dir = make_run_dir()
     result_files = []
+    js = ""  # ✅ moved here (must exist regardless)
 
     for group in groups:
         out = io.BytesIO()
@@ -370,7 +404,30 @@ def generate_zip(image_path, groups, is_pro: bool):
         ensure_under_etsy_limit(str(zip_path))
         result_files.append(str(zip_path))
 
-    return result_files
+    # ✅ after all zips generated: mark free export used (localStorage + IP)
+    if not is_pro:
+        now = time.time()
+        try:
+            ip = request.client.host
+            if ip:
+                _FREE_IP_LAST[ip] = now
+        except Exception:
+            pass
+
+        js = f"""
+<script>
+try {{
+  localStorage.setItem('snaptosize_free_used_at', '{now}');
+  const freeInput = document.querySelector('#free-state input, #free-state textarea');
+  if (freeInput) {{
+    freeInput.value = '{now}';
+    freeInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
+  }}
+}} catch(e) {{}}
+</script>
+"""
+
+    return result_files, js
 
 
 # ---------------------------------------------------------
@@ -435,11 +492,11 @@ with gr.Blocks(title=APP_NAME, elem_id="app-root") as app:
 # **{APP_NAME}**
 Fast, clean, high-quality print preparation — without the guesswork.
 
-### Free (Demo)
-- Same Pro engine  
-- 1 size group (**2x3**)  
-- Watermark included
-
+### One free export (watermarked)
+- 1 image  
+- All print sizes + ZIP  
+- Watermark included  
+- Then upgrade for unlimited exports
 
 ### Pro
 - **$12 / month** or **$99 / year (Best value)**
@@ -486,8 +543,10 @@ Paste the email you used at checkout and click **Unlock Pro**.
 
         preload_js = gr.HTML(_preload_and_autounlock_script(), elem_id="preload-js")
         persist_js = gr.HTML("", elem_id="persist-js")
+        free_state = gr.Textbox(value="", visible=False, elem_id="free-state")
+        free_js = gr.HTML("", elem_id="free-js")
 
-
+    
         def unlock(email):
             ok, msg = stripe_is_pro(email)
             js = _persist_email_script(email) if ok else ""
@@ -510,11 +569,11 @@ Paste the email you used at checkout and click **Unlock Pro**.
             session_id = None
 
         if not session_id:
-            return False, "", ""
+            return False, "", "", ""
 
         session_id = session_id.strip()
         if not session_id.startswith("cs_"):
-            return False, "", ""
+            return False, "", "", ""
 
         ok, msg, email = stripe_unlock_from_session(session_id)
         js = _persist_email_script(email) if ok else ""
@@ -528,8 +587,6 @@ Paste the email you used at checkout and click **Unlock Pro**.
         outputs=[is_pro, unlock_status, persist_js, pro_badge],
         queue=False,
     )
-
-
 
     # ==================== BATCH ZIP ====================
     with gr.Tab("Batch ZIP", elem_id="tab-batch"):
@@ -553,10 +610,11 @@ Paste the email you used at checkout and click **Unlock Pro**.
             gr.Button("Clear selection", elem_classes=["secondary"]).click(clear_all_groups, [], group_select)
 
         gr.Button("Generate ZIPs", elem_id="batch-generate-btn").click(
-            generate_zip,
-            inputs=[input_img, group_select, is_pro],
-            outputs=output_zip,
-        )
+    generate_zip,
+    inputs=[input_img, group_select, is_pro, free_state],
+    outputs=[output_zip, free_js],
+)
+
 
     # ==================== SINGLE EXPORT (ADVANCED) ====================
     with gr.Tab("Single Size Export (Advanced)", elem_id="tab-single-export"):
