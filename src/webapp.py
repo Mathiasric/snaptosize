@@ -432,8 +432,10 @@ with gr.Blocks(title=APP_NAME, elem_id="app-root") as app:
 Fast, clean, high-quality print preparation — without the guesswork.
 
 ### Free (Demo)
-- Watermarked exports  
-- Only **{', '.join(DEMO_GROUPS)}** group
+- Same Pro engine  
+- 1 size group (**2x3**)  
+- Watermark included
+
 
 ### Pro
 - **$12 / month** or **$99 / year (Best value)**
@@ -446,7 +448,7 @@ Fast, clean, high-quality print preparation — without the guesswork.
         elem_id="hero-text",
     )
     # ==================== UPGRADE + UNLOCK ====================
-    with gr.Accordion("Unlock Pro", open=True):
+    with gr.Accordion("Unlock Pro", open=False):
         gr.Markdown("### Choose a plan")
 
         with gr.Row():
@@ -455,18 +457,20 @@ Fast, clean, high-quality print preparation — without the guesswork.
 
             if STRIPE_LINK_YEARLY:
                 gr.Markdown(
-                    f"**Yearly — $99 (Best value)**  \n[{STRIPE_LINK_YEARLY}]({STRIPE_LINK_YEARLY})"
+                    f"**Yearly — $99 (Best value  · Save ~30%)**  \n[{STRIPE_LINK_YEARLY}]({STRIPE_LINK_YEARLY})"
                 )
 
             gr.Markdown(
             """
-**After purchase:** you’ll be redirected back here and Pro unlocks automatically.  
-**Not redirected?** Enter your checkout email below.
+✅ **Pro unlocks automatically after checkout.**
+
+Didn’t unlock automatically?  
+Paste the email you used at checkout and click **Unlock Pro**.
             """
         )
 
             email_in = gr.Textbox(
-            label="Email used at checkout",
+            label="Checkout email (only if needed)",
             placeholder="you@example.com",
             elem_id="checkout-email",
         )
@@ -474,6 +478,8 @@ Fast, clean, high-quality print preparation — without the guesswork.
         check_btn = gr.Button("Unlock Pro", elem_id="unlock-btn")
 
         unlock_status = gr.Markdown("")
+        unlock_status = gr.Markdown("🟣 **Pro unlocked** — enjoy unlimited exports.")
+
 
         preload_js = gr.HTML(_preload_and_autounlock_script(), elem_id="preload-js")
         persist_js = gr.HTML("", elem_id="persist-js")
