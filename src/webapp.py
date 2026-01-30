@@ -360,7 +360,8 @@ Fast, clean, high-quality print preparation — without the guesswork.
 - Watermarked exports  
 - Only **{', '.join(DEMO_GROUPS)}** group
 
-### Pro — $12 / month
+### Pro
+- **$12 / month** or **$99 / year (Best value)**
 - No watermark  
 - All print sizes  
 - Advanced export  
@@ -371,39 +372,38 @@ Fast, clean, high-quality print preparation — without the guesswork.
 
     # ==================== UPGRADE + UNLOCK ====================
     with gr.Accordion("Unlock Pro", open=True):
-        if STRIPE_LINK:
-            gr.Markdown(
-                f"""
-**Pro — $12/month**  
-Unlimited exports · All sizes · No watermark  
-Cancel anytime.
+        gr.Markdown("### Choose a plan")
 
-👉 **Subscribe here:** {STRIPE_LINK}
+        with gr.Row():
+            if STRIPE_LINK:
+                gr.Markdown(f"**Monthly — $12**  \n[{STRIPE_LINK}]({STRIPE_LINK})")
+            else:
+                gr.Markdown("⚠️ Monthly link not set (STRIPE_LINK).")
 
-### How Pro access works
-1) Subscribe via Stripe  
-2) You’ll receive an email with access details  
-3) Enter the email you used at checkout to unlock Pro  
+            if STRIPE_LINK_YEARLY:
+                gr.Markdown(
+                    f"**Yearly — $99 (Best value)**  \n[{STRIPE_LINK_YEARLY}]({STRIPE_LINK_YEARLY})"
+                )
+            else:
+                gr.Markdown("⚠️ Yearly link not set (STRIPE_LINK_YEARLY).")
 
-_Pro access remains active while your subscription is active.  
-If the subscription ends, the app automatically reverts to Demo mode._
-                """
-            )
-        else:
-            gr.Markdown(
-                """
-⚠️ Stripe link is not set.
+        gr.Markdown(
+            """
+### Unlock steps (no login)
+1) Subscribe in Stripe (you’ll get a receipt email)  
+2) Open the app and enter the **same checkout email**  
+3) If your subscription is active, Pro unlocks instantly  
 
-Set the `STRIPE_LINK` environment variable to your Stripe subscription payment link.
-                """
-            )
+_Pro stays active while your subscription is active._
+            """
+        )
 
         email_in = gr.Textbox(
             label="Email used at checkout",
             placeholder="you@example.com",
         )
 
-        check_btn = gr.Button("Check subscription")
+        check_btn = gr.Button("Unlock Pro")
         unlock_status = gr.Markdown("")
 
         def unlock(email):
