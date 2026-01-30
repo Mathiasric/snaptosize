@@ -82,13 +82,9 @@ def stripe_is_pro(email: str):
     return False, msg
 
 def stripe_unlock_from_session(session_id: str):
-    """
-    Auto-unlock after Stripe redirect: ?session_id=cs_...
-    Returns (ok: bool, msg: str)
-    """
     session_id = (session_id or "").strip()
     if not session_id:
-        return False, ""
+        return False, "", ""
 
     try:
         session = stripe.checkout.Session.retrieve(
@@ -96,25 +92,26 @@ def stripe_unlock_from_session(session_id: str):
             expand=["subscription", "customer", "customer_details"],
         )
 
-        # Must be paid
         if getattr(session, "payment_status", None) != "paid":
-            return False, "Payment not completed yet."
+            return False, "Payment not completed yet.", ""
 
-        # If subscription exists, ensure it's active/trialing
         sub = getattr(session, "subscription", None)
         if sub:
             sub_status = getattr(sub, "status", None)
             if sub_status not in ("active", "trialing"):
-                return False, f"Subscription not active ({sub_status})."
+                return False, f"Subscription not active ({sub_status}).", ""
 
-        email = None
+        email = ""
         cd = getattr(session, "customer_details", None)
         if cd and getattr(cd, "email", None):
             email = cd.email
 
-        return True, f"✅ Pro unlocked{f' for {email}' if email else ''}."
+        msg = "✅ Pro unlocked."
+        return True, msg, email
+
     except Exception as e:
-        return False, f"Could not verify checkout. ({type(e).__name__})"
+        return False, f"Could not verify checkout. ({type(e).__name__})", ""
+
 
 
 def add_watermark(im: Image.Image, text: str = WATERMARK_TEXT) -> Image.Image:
@@ -137,6 +134,49 @@ def add_watermark(im: Image.Image, text: str = WATERMARK_TEXT) -> Image.Image:
     out = Image.alpha_composite(base, overlay).convert("RGB")
     return out
 
+
+def _persist_email_script(email: str) -> str:
+    email = (email or "").strip()
+    if not email:
+        return ""
+    safe = email.replace("\\", "\\\\").replace("'", "\\'")
+    return f"""
+<script>
+try {{
+  localStorage.setItem('snaptosize_email', '{safe}');
+}} catch(e) {{}}
+</script>
+"""
+
+
+def _preload_and_autounlock_script() -> str:
+    # This runs on page load in the browser
+    return """
+<script>
+(function(){
+  try {
+    const params = new URLSearchParams(window.location.search);
+    // If coming from Stripe redirect, let server auto-unlock handle it.
+    if (params.get('session_id')) return;
+
+    const email = localStorage.getItem('snaptosize_email');
+    if (!email) return;
+
+    const input = document.querySelector('#checkout-email input');
+    if (input && !input.value) {
+      input.value = email;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    // Click unlock after a short delay (Gradio needs to mount)
+    setTimeout(function(){
+      const btn = document.querySelector('#unlock-btn button');
+      if (btn) btn.click();
+    }, 600);
+  } catch(e) {}
+})();
+</script>
+"""
 
 # ---------------------------------------------------------
 # Utilities
@@ -405,7 +445,7 @@ Fast, clean, high-quality print preparation — without the guesswork.
         """,
         elem_id="hero-text",
     )
-   # ==================== UPGRADE + UNLOCK ====================
+    # ==================== UPGRADE + UNLOCK ====================
     with gr.Accordion("Unlock Pro", open=True):
         gr.Markdown("### Choose a plan")
 
@@ -418,32 +458,40 @@ Fast, clean, high-quality print preparation — without the guesswork.
                     f"**Yearly — $99 (Best value)**  \n[{STRIPE_LINK_YEARLY}]({STRIPE_LINK_YEARLY})"
                 )
 
-        gr.Markdown(
+            gr.Markdown(
             """
 **After purchase:** you’ll be redirected back here and Pro unlocks automatically.  
 **Not redirected?** Enter your checkout email below.
             """
         )
 
-        email_in = gr.Textbox(
+            email_in = gr.Textbox(
             label="Email used at checkout",
             placeholder="you@example.com",
+            elem_id="checkout-email",
         )
 
-        check_btn = gr.Button("Unlock Pro")
+        check_btn = gr.Button("Unlock Pro", elem_id="unlock-btn")
+
         unlock_status = gr.Markdown("")
+
+        preload_js = gr.HTML(_preload_and_autounlock_script(), elem_id="preload-js")
+        persist_js = gr.HTML("", elem_id="persist-js")
+
 
         def unlock(email):
             ok, msg = stripe_is_pro(email)
+            js = _persist_email_script(email) if ok else ""
             return ok, msg
 
         check_btn.click(
             fn=unlock,
             inputs=[email_in],
-            outputs=[is_pro, unlock_status],
+            outputs=[is_pro, unlock_status, persist_js],
         )
 
     # Auto-unlock via Stripe redirect: ?session_id=cs_...
+      # Auto-unlock via Stripe redirect: ?session_id=cs_...
     def auto_unlock(request: gr.Request):
         session_id = None
         try:
@@ -452,27 +500,25 @@ Fast, clean, high-quality print preparation — without the guesswork.
             session_id = None
 
         if not session_id:
-            return False, ""
+            return False, "", ""
 
         session_id = session_id.strip()
-
-        # Only verify real Stripe checkout sessions
         if not session_id.startswith("cs_"):
-            return False, ""
+            return False, "", ""
 
-        ok, msg = stripe_unlock_from_session(session_id)
+        ok, msg, email = stripe_unlock_from_session(session_id)
+        js = _persist_email_script(email) if ok else ""
+        return ok, (msg if ok else ""), js
 
-        if not ok:
-            return False, "Could not auto-unlock. Please use your checkout email below."
-
-        return True, msg
 
     app.load(
         fn=auto_unlock,
         inputs=None,
-        outputs=[is_pro, unlock_status],
+        outputs=[is_pro, unlock_status, persist_js],
         queue=False,
     )
+
+
 
     # ==================== BATCH ZIP ====================
     with gr.Tab("Batch ZIP", elem_id="tab-batch"):
