@@ -37,6 +37,8 @@ PPI = 300  # 300 DPI/PPI export
 # ---------------------------------------------------------
 STRIPE_LINK = os.getenv("STRIPE_LINK", "").strip()  # your monthly payment link (for UI)
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "").strip()
+STRIPE_LINK_YEARLY = os.getenv("STRIPE_LINK_YEARLY", "").strip()
+
 if not STRIPE_SECRET_KEY:
     raise RuntimeError("STRIPE_SECRET_KEY is not set. Add it as an environment variable.")
 
@@ -368,11 +370,10 @@ Fast, clean, high-quality print preparation — without the guesswork.
     )
 
     # ==================== UPGRADE + UNLOCK ====================
-  # ==================== UPGRADE + UNLOCK ====================
-with gr.Accordion("Unlock Pro", open=True):
-    if STRIPE_LINK:
-        gr.Markdown(
-            f"""
+    with gr.Accordion("Unlock Pro", open=True):
+        if STRIPE_LINK:
+            gr.Markdown(
+                f"""
 **Pro — $12/month**  
 Unlimited exports · All sizes · No watermark  
 Cancel anytime.
@@ -386,34 +387,34 @@ Cancel anytime.
 
 _Pro access remains active while your subscription is active.  
 If the subscription ends, the app automatically reverts to Demo mode._
-            """
-        )
-    else:
-        gr.Markdown(
-            """
+                """
+            )
+        else:
+            gr.Markdown(
+                """
 ⚠️ Stripe link is not set.
 
 Set the `STRIPE_LINK` environment variable to your Stripe subscription payment link.
-            """
+                """
+            )
+
+        email_in = gr.Textbox(
+            label="Email used at checkout",
+            placeholder="you@example.com",
         )
 
-    email_in = gr.Textbox(
-        label="Email used at checkout",
-        placeholder="you@example.com",
-    )
+        check_btn = gr.Button("Check subscription")
+        unlock_status = gr.Markdown("")
 
-    check_btn = gr.Button("Check subscription")
-    unlock_status = gr.Markdown("")
+        def unlock(email):
+            ok, msg = stripe_is_pro(email)
+            return ok, msg
 
-    def unlock(email):
-        ok, msg = stripe_is_pro(email)
-        return ok, msg
-
-    check_btn.click(
-        fn=unlock,
-        inputs=[email_in],
-        outputs=[is_pro, unlock_status],
-    )
+        check_btn.click(
+            fn=unlock,
+            inputs=[email_in],
+            outputs=[is_pro, unlock_status],
+        )
 
     # ==================== BATCH ZIP ====================
     with gr.Tab("Batch ZIP", elem_id="tab-batch"):
