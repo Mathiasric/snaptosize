@@ -474,37 +474,6 @@ Fast, clean, high-quality print preparation — without the guesswork.
         queue=False,
     )
 
-    # Auto-unlock via Stripe redirect: ?session_id=cs_...
-    def auto_unlock(request: gr.Request):
-        session_id = None
-        try:
-            session_id = request.query_params.get("session_id")
-        except Exception:
-            session_id = None
-
-        if not session_id:
-            return False, ""
-
-        session_id = session_id.strip()
-
-        # Only verify real Stripe checkout sessions
-        if not session_id.startswith("cs_"):
-            return False, ""
-
-        ok, msg = stripe_unlock_from_session(session_id)
-
-        if not ok:
-            return False, "Could not auto-unlock. Please use your checkout email below."
-
-        return True, msg
-
-    app.load(
-        fn=auto_unlock,
-        inputs=None,
-        outputs=[is_pro, unlock_status],
-        queue=False,
-    )
-
     # ==================== BATCH ZIP ====================
     with gr.Tab("Batch ZIP", elem_id="tab-batch"):
         gr.Markdown(
