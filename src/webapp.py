@@ -267,6 +267,8 @@ def generate_zip(image_path, groups, is_pro: bool):
                 else:
                     if isinstance(spec, tuple) and len(spec) == 3:
                         label, w_in, h_in = spec
+                        if not str(label).endswith("in"):
+                            label = f"{label}in"
                     else:
                         w_in, h_in = spec
                         label = f"{w_in}x{h_in}in"
