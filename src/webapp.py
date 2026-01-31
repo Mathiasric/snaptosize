@@ -754,7 +754,8 @@ Paste the email you used at checkout and click **Unlock Pro**.
             inputs=[single_img, orientation, single_group, single_size, is_pro],
             outputs=single_out,
         )
-
+        
+from src.webapp import app, CUSTOM_CSS
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "7860"))
