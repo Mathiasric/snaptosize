@@ -142,11 +142,11 @@ select {
 }
 .hero { margin-bottom: 12px; }
 .hero-title { margin: 0 0 6px 0; }
-.hero-sub { margin: 0 0 14px 0; opacity: .9; }
+.hero-sub { margin: 0 0 10px 0; opacity: .9; }
 
 .plan-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 16px;
   margin-top: 10px;
   margin-bottom: 8px;
@@ -170,17 +170,17 @@ select {
 .plan-price { opacity: .85; font-size: 0.95em; }
 
 .plan-list { margin: 0; padding-left: 16px; }
-.plan-list li { margin: 4px 0; }
+.plan-list li { margin: 2px 0; }
 
 .plan-pro { border-color: rgba(249,115,22,.35); }
-
-@media (max-width: 720px) {
-  .plan-grid { grid-template-columns: 1fr; }
-}
 
 /* ---------------------------------------------------------
    RESPONSIVE
 --------------------------------------------------------- */
+@media (max-width: 560px) {
+  .plan-grid { grid-template-columns: 1fr; }
+}
+
 @media (max-width: 768px) {
     #hero-text {
         padding: 16px !important;
