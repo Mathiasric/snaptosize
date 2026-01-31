@@ -576,28 +576,44 @@ with gr.Blocks(title=APP_NAME, elem_id="app-root") as app:
     pro_badge = gr.Markdown("", elem_id="pro-badge")
     is_pro = gr.State(False)
 
-    gr.Markdown(
-        f"""
-# **{APP_NAME}**
-Fast, clean, high-quality print preparation — without the guesswork.
+    gr.HTML(
+    f"""
+<div class="hero">
+  <h1 class="hero-title">{APP_NAME}</h1>
+  <p class="hero-sub">Fast, clean, high-quality print preparation — without the guesswork.</p>
 
-### One free export (watermarked)
-- 1 image  
-- All print sizes + ZIP  
-- Watermark included  
-- Then upgrade for unlimited exports
+  <div class="plan-grid">
+    <div class="plan-card">
+      <div class="plan-head">
+        <div class="plan-name">Free (Demo)</div>
+        <div class="plan-price">1 export</div>
+      </div>
+      <ul class="plan-list">
+        <li>1 image</li>
+        <li>All print sizes + ZIP</li>
+        <li>Watermark included</li>
+        <li>Best for previewing quality</li>
+      </ul>
+    </div>
 
-### Pro
-- **$12 / month** or **$99 / year (Best value)**
-- No watermark  
-- All print sizes  
-- Advanced export  
-- Cancel anytime
-
-        """,
-        elem_id="hero-text",
-    )
-
+    <div class="plan-card plan-pro">
+      <div class="plan-head">
+        <div class="plan-name">Pro</div>
+        <div class="plan-price">$12 / mo · $99 / yr</div>
+      </div>
+      <ul class="plan-list">
+        <li>No watermark</li>
+        <li>Unlimited exports</li>
+        <li>All print sizes</li>
+        <li>Advanced export</li>
+        <li>Cancel anytime</li>
+      </ul>
+    </div>
+  </div>
+</div>
+""",
+    elem_id="hero-text",
+)
     # ==================== UPGRADE + UNLOCK ====================
     with gr.Accordion("Unlock Pro", open=False):
         gr.Markdown("### Choose a plan")

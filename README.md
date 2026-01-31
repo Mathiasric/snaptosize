@@ -4,7 +4,8 @@ sdk: gradio
 python_version: 3.11
 ---
 
-# SnapToSize
+# SnapToSize – Etsy Image Resizer for Print Files
+
 
 **SnapToSize** turns one image into **all Etsy-ready print sizes** — clean, high-quality, and ready to sell.
 
@@ -18,6 +19,7 @@ Built for creators who sell **digital prints**.
 ---
 
 ## 🎯 Who SnapToSize Is For
+**SnapToSize is an Etsy image resizer that converts one image into all required print sizes without cropping important details.**
 
 - Etsy sellers selling digital downloads  
 - Print-on-demand creators  
@@ -61,6 +63,7 @@ No manual resizing.
 - Advanced single-size exports
 - Batch ZIP downloads
 - Cancel anytime (managed via Stripe)
+👉 Upgrade to Pro: https://snaptosize.com/#pricing
 
 No accounts.  
 No login.  

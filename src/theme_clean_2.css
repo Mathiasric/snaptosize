@@ -140,6 +140,43 @@ select {
   background: rgba(242, 138, 58, 0.08);
   border-radius: 10px;
 }
+.hero { margin-bottom: 12px; }
+.hero-title { margin: 0 0 6px 0; }
+.hero-sub { margin: 0 0 14px 0; opacity: .9; }
+
+.plan-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 10px;
+  margin-bottom: 8px;
+}
+
+.plan-card {
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 12px;
+  padding: 14px 14px 10px 14px;
+  background: rgba(255,255,255,.03);
+}
+
+.plan-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 10px;
+}
+
+.plan-name { font-weight: 700; }
+.plan-price { opacity: .85; font-size: 0.95em; }
+
+.plan-list { margin: 0; padding-left: 16px; }
+.plan-list li { margin: 4px 0; }
+
+.plan-pro { border-color: rgba(249,115,22,.35); }
+
+@media (max-width: 720px) {
+  .plan-grid { grid-template-columns: 1fr; }
+}
 
 /* ---------------------------------------------------------
    RESPONSIVE
