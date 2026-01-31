@@ -228,6 +228,16 @@ def normalize_image(im: Image.Image) -> Image.Image:
     im = ImageOps.exif_transpose(im)
     if im.mode != "RGB":
         im = im.convert("RGB")
+          # 🔒 HARD SIZE LIMIT (prevents huge uploads killing UI/memory)
+    MAX_INPUT_PX = 10000  # safe, generous, print-quality friendly
+    w, h = im.size
+
+    if max(w, h) > MAX_INPUT_PX:
+        scale = MAX_INPUT_PX / max(w, h)
+        im = im.resize(
+            (int(w * scale), int(h * scale)),
+            Image.LANCZOS
+        )
     return im
 
 
