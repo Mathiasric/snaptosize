@@ -18,6 +18,7 @@ import gradio as gr
 HERE = Path(__file__).resolve().parent
 CSS_PATH = HERE / "theme_clean_2.css"
 CUSTOM_CSS = CSS_PATH.read_text(encoding="utf-8") if CSS_PATH.exists() else ""
+
 print("CSS loaded:", len(CUSTOM_CSS), "from", CSS_PATH)
 
 # ---------------------------------------------------------
