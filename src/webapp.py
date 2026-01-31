@@ -406,7 +406,7 @@ def build_size_map(group: str, orientation: str):
 # ---------------------------------------------------------
 # Batch ZIP generator
 # ---------------------------------------------------------
-def generate_zip(image_path, groups, is_pro: bool, free_used_at: str, request: gr.Request):
+def generate_zip(image_path, groups, is_pro: bool, free_used_at: str, request: gr.Request = None):
     if not image_path:
         raise gr.Error("Upload an image first.")
     if not groups:
@@ -755,12 +755,4 @@ Paste the email you used at checkout and click **Unlock Pro**.
             outputs=single_out,
         )
         
-from src.webapp import app, CUSTOM_CSS
-
-if __name__ == "__main__":
-    port = int(os.getenv("PORT", "7860"))
-    host = "0.0.0.0" if os.getenv("SPACE_ID") else "127.0.0.1"
-
-    # Gradio 6: pass CSS to launch() (not Blocks)
-    app.launch(server_name=host, server_port=port, css=CUSTOM_CSS)
 
