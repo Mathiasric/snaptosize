@@ -54,6 +54,9 @@ _CACHE_TTL = 600  # seconds (10 min)
 _FREE_IP_LAST = {}
 _FREE_COOLDOWN_SECONDS = 24 * 60 * 60
 
+_FREE_CLIENT_LAST = {}  # session_hash fallback cache
+
+
 
 def stripe_is_pro(email: str):
     email = (email or "").strip().lower()
@@ -119,23 +122,47 @@ def stripe_unlock_from_session(session_id: str):
 
 def add_watermark(im: Image.Image, text: str = WATERMARK_TEXT) -> Image.Image:
     """
-    Simple watermark that doesn't need external fonts.
-    Keeps output valid JPG (RGB).
+    Loud, unavoidable watermark for demo output.
+    Diagonal, repeated, with strong contrast.
     """
     base = im.copy().convert("RGBA")
     w, h = base.size
 
     overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
-    font = ImageFont.load_default()
 
-    step = max(220, min(w, h) // 3)
-    for y in range(0, h, step):
-        for x in range(0, w, step):
-            draw.text((x, y), text, font=font, fill=(255, 255, 255, 70))
+    # Big font (try a real font; fallback to default)
+    font_size = max(36, int(min(w, h) * 0.08))
+    try:
+        font = ImageFont.truetype("DejaVuSans.ttf", font_size)
+    except Exception:
+        font = ImageFont.load_default()
+
+    # Create a tile that we rotate and paste across image
+    tile_w = int(w * 0.8)
+    tile_h = int(h * 0.25)
+    tile = Image.new("RGBA", (tile_w, tile_h), (0, 0, 0, 0))
+    tdraw = ImageDraw.Draw(tile)
+
+    # Text shadow/outline for contrast
+    x, y = 20, int(tile_h * 0.25)
+    for dx, dy in [(-2,0),(2,0),(0,-2),(0,2)]:
+        tdraw.text((x+dx, y+dy), text, font=font, fill=(0, 0, 0, 200))
+    tdraw.text((x, y), text, font=font, fill=(255, 255, 255, 230))
+
+    # Rotate tile diagonally
+    tile = tile.rotate(25, expand=True)
+
+    # Stamp repeatedly
+    step_x = max(260, tile.size[0] // 2)
+    step_y = max(220, tile.size[1] // 2)
+    for yy in range(-tile.size[1], h + tile.size[1], step_y):
+        for xx in range(-tile.size[0], w + tile.size[0], step_x):
+            overlay.alpha_composite(tile, (xx, yy))
 
     out = Image.alpha_composite(base, overlay).convert("RGB")
     return out
+
 
 
 def _persist_email_script(email: str) -> str:
@@ -242,6 +269,52 @@ def make_run_dir() -> Path:
     return Path(tempfile.mkdtemp(prefix=f"snaptosize_{ts}_"))
 
 
+def get_client_ip(request: gr.Request) -> str | None:
+    """Best-effort client IP behind proxies (HF/Cloudflare/etc)."""
+    try:
+        h = request.headers or {}
+    except Exception:
+        h = {}
+
+    # keys can vary in casing
+    def _get(k: str):
+        return h.get(k) or h.get(k.lower()) or h.get(k.upper())
+
+    # Prefer CF / reverse proxy headers
+    ip = _get("cf-connecting-ip")
+    if ip:
+        return ip.strip()
+
+    xff = _get("x-forwarded-for")
+    if xff:
+        # can be "client, proxy1, proxy2"
+        return xff.split(",")[0].strip()
+
+    xri = _get("x-real-ip")
+    if xri:
+        return xri.strip()
+
+    # Fallback
+    try:
+        return request.client.host
+    except Exception:
+        return None
+
+
+def get_client_id(request: gr.Request) -> str:
+    """Stable-ish identifier per browser session if available, else IP."""
+    # Gradio often has session_hash internally
+    sid = getattr(request, "session_hash", None)
+    if sid:
+        return f"sid:{sid}"
+
+    ip = get_client_ip(request)
+    if ip:
+        return f"ip:{ip}"
+
+    # last resort: something constant
+    return "unknown"
+
 # ---------------------------------------------------------
 # Presets
 # ---------------------------------------------------------
@@ -338,35 +411,47 @@ def generate_zip(image_path, groups, is_pro: bool, free_used_at: str, request: g
     if not groups:
         raise gr.Error("Choose at least one group.")
 
-    # ONE FREE EXPORT (watermarked) per 24h
-    if not is_pro:
-        now = time.time()
+    now = time.time()
 
-        # localStorage timestamp check
+    # -----------------------------
+    # FREE LIMIT (HARD)
+    # -----------------------------
+    if not is_pro:
+        # 1) Server-side client cooldown (best)
+        client_id = get_client_id(request)
+        last = _FREE_CLIENT_LAST.get(client_id, 0.0)
+        if last and (now - last) < _FREE_COOLDOWN_SECONDS:
+            raise gr.Error(
+                "You’ve already used your free export. "
+                "Upgrade to remove the watermark and unlock unlimited exports."
+            )
+
+        # 2) localStorage cooldown (cross-refresh)
         try:
             used_ts = float(free_used_at) if free_used_at else 0.0
         except Exception:
             used_ts = 0.0
 
         if used_ts and (now - used_ts) < _FREE_COOLDOWN_SECONDS:
-            raise gr.Error("You’ve used your free export. Upgrade to remove watermark and unlock unlimited exports.")
+            raise gr.Error(
+                "You’ve already used your free export. "
+                "Upgrade to remove the watermark and unlock unlimited exports."
+            )
 
-        # IP cooldown (best effort anti-incognito)
-        ip = None
-        try:
-            ip = request.client.host
-        except Exception:
-            ip = None
-
+        # 3) IP cooldown (best-effort anti-incognito)
+        ip = get_client_ip(request)
         if ip:
             last = _FREE_IP_LAST.get(ip, 0.0)
             if last and (now - last) < _FREE_COOLDOWN_SECONDS:
-                raise gr.Error("Free export already used on this network. Upgrade to unlock unlimited exports.")
+                raise gr.Error(
+                    "Free export already used on this network. "
+                    "Upgrade to unlock unlimited exports."
+                )
+
 
     im = normalize_image(Image.open(image_path))
     run_dir = make_run_dir()
     result_files = []
-    js = ""  # ✅ moved here (must exist regardless)
 
     for group in groups:
         out = io.BytesIO()
@@ -404,13 +489,16 @@ def generate_zip(image_path, groups, is_pro: bool, free_used_at: str, request: g
         ensure_under_etsy_limit(str(zip_path))
         result_files.append(str(zip_path))
 
-    # ✅ after all zips generated: mark free export used (localStorage + IP)
+    # -----------------------------
+    # MARK FREE EXPORT AS USED
+    # -----------------------------
+    js = ""
+
     if not is_pro:
         now = time.time()
         try:
-            ip = request.client.host
-            if ip:
-                _FREE_IP_LAST[ip] = now
+            client_id = get_client_id(request)
+            _FREE_CLIENT_LAST[client_id] = now
         except Exception:
             pass
 
@@ -426,6 +514,7 @@ try {{
 }} catch(e) {{}}
 </script>
 """
+
 
     return result_files, js
 
