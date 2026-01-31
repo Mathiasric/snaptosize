@@ -50,7 +50,7 @@ WATERMARK_TEXT = "SNAPTOSIZE DEMO"
 
 # simple cache so we don't hit Stripe constantly
 _PRO_CACHE = {}
-_CACHE_TTL = 600  # seconds (10 min)
+_CACHE_TTL = 60  
 
 _FREE_IP_LAST = {}
 _FREE_COOLDOWN_SECONDS = 24 * 60 * 60
@@ -199,15 +199,24 @@ def _preload_and_autounlock_script() -> str:
       freeInput.dispatchEvent(new Event('input', { bubbles: true }));
     }
 
-    // 2) If we have a stored checkout email, preload it and try auto-unlock
-    const email = localStorage.getItem('snaptosize_email');
-    if (!email) return;
+  // 2) If we have a stored checkout email, preload it + also fill hidden saved-email for backend auto-unlock
+const saved = localStorage.getItem('snaptosize_email') || "";
 
-    const input = document.querySelector('#checkout-email input');
-    if (input && !input.value) {
-      input.value = email;
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-    }
+// Fill visible email input (if present)
+const input = document.querySelector('#checkout-email input');
+if (input && !input.value && saved) {
+  input.value = saved;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+// Fill hidden email input used for app.load auto-unlock (must run even if visible field isn't there)
+const emailHidden = document.querySelector('#saved-email input, #saved-email textarea');
+if (emailHidden && !emailHidden.value) {
+  emailHidden.value = saved;
+  emailHidden.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+
 
     // Click unlock after a short delay (Gradio needs to mount)
     setTimeout(function(){
@@ -224,21 +233,21 @@ def _preload_and_autounlock_script() -> str:
 # Utilities
 # ---------------------------------------------------------
 def normalize_image(im: Image.Image) -> Image.Image:
-    """Fix EXIF rotation + ensure RGB."""
+    """Fix EXIF rotation + ensure RGB + downscale huge images."""
     im = ImageOps.exif_transpose(im)
+
     if im.mode != "RGB":
         im = im.convert("RGB")
-          # 🔒 HARD SIZE LIMIT (prevents huge uploads killing UI/memory)
+
+    # 🔒 HARD SIZE LIMIT (prevents huge uploads killing UI/memory)
     MAX_INPUT_PX = 10000  # safe, generous, print-quality friendly
     w, h = im.size
-
     if max(w, h) > MAX_INPUT_PX:
         scale = MAX_INPUT_PX / max(w, h)
-        im = im.resize(
-            (int(w * scale), int(h * scale)),
-            Image.LANCZOS
-        )
+        im = im.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+
     return im
+
 
 
 def resize_image(im: Image.Image, w: int, h: int) -> Image.Image:
@@ -510,6 +519,9 @@ def generate_zip(image_path, groups, is_pro: bool, free_used_at: str, request: g
         try:
             client_id = get_client_id(request)
             _FREE_CLIENT_LAST[client_id] = now
+            if ip:
+               _FREE_IP_LAST[ip] = now
+
         except Exception:
             pass
 
@@ -588,7 +600,7 @@ with gr.Blocks(title=APP_NAME, elem_id="app-root") as app:
     is_pro = gr.State(False)
 
     gr.HTML(
-    f"""
+        f"""
 <div class="hero">
   <h1 class="hero-title">{APP_NAME}</h1>
   <p class="hero-sub">Fast, clean, high-quality print preparation — without the guesswork.</p>
@@ -623,8 +635,9 @@ with gr.Blocks(title=APP_NAME, elem_id="app-root") as app:
   </div>
 </div>
 """,
-    elem_id="hero-text",
-)
+        elem_id="hero-text",
+    )
+
     # ==================== UPGRADE + UNLOCK ====================
     with gr.Accordion("Unlock Pro", open=False):
         gr.Markdown("### Choose a plan")
@@ -638,7 +651,7 @@ with gr.Blocks(title=APP_NAME, elem_id="app-root") as app:
                     f"**Yearly — $99 (Best value  · Save ~30%)**  \n[{STRIPE_LINK_YEARLY}]({STRIPE_LINK_YEARLY})"
                 )
 
-            gr.Markdown(
+        gr.Markdown(
             """
 ✅ **Pro unlocks automatically after checkout.**
 
@@ -647,22 +660,22 @@ Paste the email you used at checkout and click **Unlock Pro**.
             """
         )
 
-            email_in = gr.Textbox(
+        email_in = gr.Textbox(
             label="Checkout email (only if needed)",
             placeholder="you@example.com",
             elem_id="checkout-email",
         )
 
         check_btn = gr.Button("Unlock Pro", elem_id="unlock-btn")
-
         unlock_status = gr.Markdown("")
 
         preload_js = gr.HTML(_preload_and_autounlock_script(), elem_id="preload-js")
         persist_js = gr.HTML("", elem_id="persist-js")
+
         free_state = gr.Textbox(value="", visible=False, elem_id="free-state")
+        saved_email = gr.Textbox(value="", visible=False, elem_id="saved-email")
         free_js = gr.HTML("", elem_id="free-js")
 
-    
         def unlock(email):
             ok, msg = stripe_is_pro(email)
             js = _persist_email_script(email) if ok else ""
@@ -675,31 +688,35 @@ Paste the email you used at checkout and click **Unlock Pro**.
             outputs=[is_pro, unlock_status, persist_js, pro_badge],
         )
 
-    # Auto-unlock via Stripe redirect: ?session_id=cs_...
-      # Auto-unlock via Stripe redirect: ?session_id=cs_...
-    def auto_unlock(request: gr.Request):
+    # Auto-unlock via Stripe redirect (?session_id=cs_...) OR saved email
+    def auto_unlock(saved_email_value: str, request: gr.Request):
+        # 1) Stripe redirect unlock (?session_id=cs_...)
         session_id = None
         try:
             session_id = request.query_params.get("session_id")
         except Exception:
             session_id = None
 
-        if not session_id:
+        if session_id:
+            session_id = session_id.strip()
+            if session_id.startswith("cs_"):
+                ok, msg, email = stripe_unlock_from_session(session_id)
+                js = _persist_email_script(email) if ok else ""
+                badge = render_pro_badge(ok)
+                return ok, (msg if ok else ""), js, badge
+
+        # 2) Auto-unlock from saved email
+        email = (saved_email_value or "").strip()
+        if not email:
             return False, "", "", ""
 
-        session_id = session_id.strip()
-        if not session_id.startswith("cs_"):
-            return False, "", "", ""
-
-        ok, msg, email = stripe_unlock_from_session(session_id)
-        js = _persist_email_script(email) if ok else ""
+        ok, msg = stripe_is_pro(email)
         badge = render_pro_badge(ok)
-        return ok, (msg if ok else ""), js, badge
-
+        return ok, (msg if ok else ""), "", badge
 
     app.load(
         fn=auto_unlock,
-        inputs=None,
+        inputs=[saved_email],
         outputs=[is_pro, unlock_status, persist_js, pro_badge],
         queue=False,
     )
@@ -712,7 +729,7 @@ Paste the email you used at checkout and click **Unlock Pro**.
         )
 
         with gr.Row(elem_id="batch-row"):
-            input_img = gr.Image(type="filepath", label="Upload image", elem_id="batch-input-image")
+            input_img = gr.Image(type="filepath", label="Upload image", height=320, elem_id="batch-input-image")
             output_zip = gr.Files(label="Download ZIPs", elem_id="batch-output-zip")
 
         group_select = gr.CheckboxGroup(
@@ -726,11 +743,10 @@ Paste the email you used at checkout and click **Unlock Pro**.
             gr.Button("Clear selection", elem_classes=["secondary"]).click(clear_all_groups, [], group_select)
 
         gr.Button("Generate ZIPs", elem_id="batch-generate-btn").click(
-    generate_zip,
-    inputs=[input_img, group_select, is_pro, free_state],
-    outputs=[output_zip, free_js],
-)
-
+            generate_zip,
+            inputs=[input_img, group_select, is_pro, free_state],
+            outputs=[output_zip, free_js],
+        )
 
     # ==================== SINGLE EXPORT (ADVANCED) ====================
     with gr.Tab("Single Size Export (Advanced)", elem_id="tab-single-export"):
@@ -764,5 +780,3 @@ Paste the email you used at checkout and click **Unlock Pro**.
             inputs=[single_img, orientation, single_group, single_size, is_pro],
             outputs=single_out,
         )
-        
-
