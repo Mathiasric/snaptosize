@@ -181,6 +181,12 @@ select {
 
 .plan-pro { border-color: rgba(249,115,22,.35); }
 
+#single-input-image img,
+#single-input-image .image-container {
+    max-height: 320px !important;
+    object-fit: contain;
+}
+
 /* ---------------------------------------------------------
    RESPONSIVE
 --------------------------------------------------------- */

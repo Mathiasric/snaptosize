@@ -757,7 +757,7 @@ Paste the email you used at checkout and click **Unlock Pro**.
         )
 
         with gr.Row(elem_id="single-row"):
-            single_img = gr.Image(type="pil", label="Upload image (JPG recommended)", elem_id="single-input-image")
+            single_img = gr.Image(type="pil", label="Upload image (JPG recommended)", height=320, elem_id="single-input-image")
             single_out = gr.File(label="Download JPG", elem_id="single-output-file")
 
         with gr.Row(elem_id="single-controls-row"):
