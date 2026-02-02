@@ -31,7 +31,7 @@ MAX_ZIP_SIZE_MB = 20
 MAX_ZIP_SIZE_BYTES = MAX_ZIP_SIZE_MB * 1024 * 1024
 
 APP_NAME = "SnapToSize"
-PPI = 300  # 300 DPI/PPI export
+PPI = 300  # 300 DPI/PPI export for print
 
 # ---------------------------------------------------------
 # Paywall (Stripe = source of truth)
