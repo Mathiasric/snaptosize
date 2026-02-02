@@ -622,7 +622,7 @@ with gr.Blocks(title=APP_NAME, elem_id="app-root") as app:
     <div class="plan-card plan-pro">
       <div class="plan-head">
         <div class="plan-name">Pro</div>
-        <div class="plan-price">$12 / mo · $99 / yr</div>
+        <div class="plan-price">$11.99 / mo · $97 / yr</div>
       </div>
       <ul class="plan-list">
         <li>No watermark</li>
@@ -644,11 +644,11 @@ with gr.Blocks(title=APP_NAME, elem_id="app-root") as app:
 
         with gr.Row():
             if STRIPE_LINK:
-                gr.Markdown(f"**Monthly — $12**  \n[{STRIPE_LINK}]({STRIPE_LINK})")
+                gr.Markdown(f"**Monthly — $11.99**  \n[{STRIPE_LINK}]({STRIPE_LINK})")
 
             if STRIPE_LINK_YEARLY:
                 gr.Markdown(
-                    f"**Yearly — $99 (Best value  · Save ~30%)**  \n[{STRIPE_LINK_YEARLY}]({STRIPE_LINK_YEARLY})"
+                    f"**Yearly — $97 (Best value  · Save ~33%)**  \n[{STRIPE_LINK_YEARLY}]({STRIPE_LINK_YEARLY})"
                 )
 
         gr.Markdown(
