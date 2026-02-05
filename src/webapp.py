@@ -15,13 +15,14 @@ import gradio as gr
 # CSS
 # ---------------------------------------------------------
 HERE = Path(__file__).resolve().parent
-CSS_PATH = HERE / "theme_clean_2.css"
+CSS_PATH = HERE.parent / "theme_clean_2.css"
 CUSTOM_CSS = CSS_PATH.read_text(encoding="utf-8") if CSS_PATH.exists() else ""
 
 print("CSS loaded:", len(CUSTOM_CSS), "from", CSS_PATH)
 
 custom_css = """
-footer { display: none !important; }
+/* Kill Gradio footer + API/settings bar */
+footer, .built-with { display: none !important; }
 .gradio-container > footer { display: none !important; }
 a[href*="gradio"] { display: none !important; }
 .gradio-container { padding-bottom: 0 !important; margin-bottom: 0 !important; }
@@ -601,7 +602,7 @@ def clear_all_groups():
 def render_pro_badge(ok: bool) -> str:
     return "🟣 **Pro active** — unlimited exports enabled." if ok else ""
 
-with gr.Blocks(title=APP_NAME, elem_id="app-root", css=custom_css) as app:
+with gr.Blocks(title=APP_NAME, elem_id="app-root") as app:
     pro_badge = gr.Markdown("", elem_id="pro-badge")
     is_pro = gr.State(False)
 
@@ -786,3 +787,5 @@ Paste the email you used at checkout and click **Unlock Pro**.
             inputs=[single_img, orientation, single_group, single_size, is_pro],
             outputs=single_out,
         )
+
+
