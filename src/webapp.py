@@ -434,6 +434,7 @@ def build_size_map(group: str, orientation: str):
 # Batch ZIP generator
 # ---------------------------------------------------------
 def generate_zip(image_path, groups, is_pro: bool, free_used_at: str, request: gr.Request = None):
+    print("generate_zip START", {"groups": groups, "is_pro": is_pro})
     if not image_path:
         raise gr.Error("Upload an image first.")
     if not groups:
@@ -541,7 +542,7 @@ try {{
 </script>
 """
 
-
+    print("generate_zip DONE", {"zips": len(result_files)})
     return result_files, js
 
 
@@ -732,7 +733,12 @@ Paste the email you used at checkout and click **Unlock Pro**.
         )
 
         with gr.Row(elem_id="batch-row"):
-            input_img = gr.Image(type="filepath", label="Upload image (JPG recommended)", height=320, elem_id="batch-input-image")
+            input_img = gr.Image(
+                type="filepath",
+                label="Upload image (JPG recommended)",
+                height=320,
+                elem_id="batch-input-image",
+            )
             output_zip = gr.Files(label="Download ZIPs", elem_id="batch-output-zip")
 
         group_select = gr.CheckboxGroup(
@@ -742,14 +748,26 @@ Paste the email you used at checkout and click **Unlock Pro**.
         )
 
         with gr.Row(elem_id="batch-actions-row"):
-            gr.Button("Select all groups", elem_classes=["secondary"]).click(select_all_groups, [], group_select)
-            gr.Button("Clear selection", elem_classes=["secondary"]).click(clear_all_groups, [], group_select)
+            gr.Button("Select all groups", elem_classes=["secondary"]).click(
+                select_all_groups,
+                inputs=[],
+                outputs=group_select,
+                queue=False,
+            )
+            gr.Button("Clear selection", elem_classes=["secondary"]).click(
+                clear_all_groups,
+                inputs=[],
+                outputs=group_select,
+                queue=False,
+            )
 
         gr.Button("Generate ZIPs", elem_id="batch-generate-btn").click(
-            generate_zip,
+            fn=generate_zip,
             inputs=[input_img, group_select, is_pro, free_state],
             outputs=[output_zip, free_js],
+            queue=False,
         )
+
 
     # ==================== SINGLE EXPORT (ADVANCED) ====================
     with gr.Tab("Single Size Export (Advanced)", elem_id="tab-single-export"):
