@@ -1,4 +1,3 @@
-import io
 import os
 import tempfile
 import zipfile
@@ -138,49 +137,41 @@ def stripe_unlock_from_session(session_id: str):
         return False, f"Could not verify checkout. ({type(e).__name__})", ""
 
 
-def add_watermark(im: Image.Image, text: str = WATERMARK_TEXT) -> Image.Image:
+def add_watermark(im: Image.Image, text: str = "SnapToSize") -> Image.Image:
     """
-    Loud, unavoidable watermark for demo output.
-    Diagonal, repeated, with strong contrast.
+    Light watermark: single centered text.
+    Much cheaper than tiled/diagonal stamping.
     """
-    base = im.copy().convert("RGBA")
+    base = im.convert("RGBA")
     w, h = base.size
 
     overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
 
-    # Big font (try a real font; fallback to default)
-    font_size = max(36, int(min(w, h) * 0.08))
+    # Scale font to image size (safe + readable)
+    font_size = max(24, int(min(w, h) * 0.06))
     try:
         font = ImageFont.truetype("DejaVuSans.ttf", font_size)
     except Exception:
         font = ImageFont.load_default()
 
-    # Create a tile that we rotate and paste across image
-    tile_w = int(w * 0.8)
-    tile_h = int(h * 0.25)
-    tile = Image.new("RGBA", (tile_w, tile_h), (0, 0, 0, 0))
-    tdraw = ImageDraw.Draw(tile)
+    # Measure text
+    bbox = draw.textbbox((0, 0), text, font=font)
+    tw = bbox[2] - bbox[0]
+    th = bbox[3] - bbox[1]
 
-    # Text shadow/outline for contrast
-    x, y = 20, int(tile_h * 0.25)
-    for dx, dy in [(-2,0),(2,0),(0,-2),(0,2)]:
-        tdraw.text((x+dx, y+dy), text, font=font, fill=(0, 0, 0, 200))
-    tdraw.text((x, y), text, font=font, fill=(255, 255, 255, 230))
+    # Center position
+    x = (w - tw) // 2
+    y = (h - th) // 2
 
-    # Rotate tile diagonally
-    tile = tile.rotate(25, expand=True)
-
-    # Stamp repeatedly
-    step_x = max(260, tile.size[0] // 2)
-    step_y = max(220, tile.size[1] // 2)
-    for yy in range(-tile.size[1], h + tile.size[1], step_y):
-        for xx in range(-tile.size[0], w + tile.size[0], step_x):
-            overlay.alpha_composite(tile, (xx, yy))
+    # Subtle shadow for contrast
+    shadow_alpha = 120
+    text_alpha = 160
+    draw.text((x + 2, y + 2), text, font=font, fill=(0, 0, 0, shadow_alpha))
+    draw.text((x, y), text, font=font, fill=(255, 255, 255, text_alpha))
 
     out = Image.alpha_composite(base, overlay).convert("RGB")
     return out
-
 
 
 def _persist_email_script(email: str) -> str:
@@ -493,9 +484,8 @@ def generate_zip(image_path, groups, is_pro: bool, free_used_at: str, request: g
     result_files = []
 
     for group in groups:
-        out = io.BytesIO()
-
-        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
+        zip_path = run_dir / f"{group}.zip"
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
             for spec in PRINT_SIZES[group]:
                 if group == "ISO":
                     label, w, h = spec
@@ -516,14 +506,8 @@ def generate_zip(image_path, groups, is_pro: bool, free_used_at: str, request: g
                     img = add_watermark(img)
 
                 filename = f"{safe_name(label)}_{w}x{h}.jpg"
-                buf = io.BytesIO()
-                img.save(buf, "JPEG", quality=JPEG_QUALITY, dpi=DPI)
-                buf.seek(0)
-                zf.writestr(filename, buf.read())
-
-        out.seek(0)
-        zip_path = run_dir / f"{group}.zip"
-        zip_path.write_bytes(out.getvalue())
+                with zf.open(filename, "w") as f:
+                    img.save(f, "JPEG", quality=JPEG_QUALITY, dpi=DPI)
 
         ensure_under_etsy_limit(str(zip_path))
         result_files.append(str(zip_path))
