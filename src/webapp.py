@@ -444,14 +444,22 @@ def generate_zip(image_path, groups, is_pro: bool, free_used_at: str, request: g
     # FREE LIMIT (HARD)
     # -----------------------------
     if not is_pro:
+        paywall_msg = (
+            "Your files are ready. Upgrade to download clean Etsy-ready ZIPs (no watermark, unlimited exports)."
+        )
+        if STRIPE_LINK or STRIPE_LINK_YEARLY:
+            paywall_msg += "\n\n"
+            if STRIPE_LINK:
+                paywall_msg += f"Monthly: {STRIPE_LINK}\n"
+            if STRIPE_LINK_YEARLY:
+                paywall_msg += f"Yearly: {STRIPE_LINK_YEARLY}"
+            paywall_msg = paywall_msg.strip()
+
         # 1) Server-side client cooldown (best)
         client_id = get_client_id(request)
         last = _FREE_CLIENT_LAST.get(client_id, 0.0)
         if last and (now - last) < _FREE_COOLDOWN_SECONDS:
-            raise gr.Error(
-                "You’ve already used your free export. "
-                "Upgrade to remove the watermark and unlock unlimited exports."
-            )
+            raise gr.Error(paywall_msg)
 
         # 2) localStorage cooldown (cross-refresh)
         try:
@@ -460,20 +468,14 @@ def generate_zip(image_path, groups, is_pro: bool, free_used_at: str, request: g
             used_ts = 0.0
 
         if used_ts and (now - used_ts) < _FREE_COOLDOWN_SECONDS:
-            raise gr.Error(
-                "You’ve already used your free export. "
-                "Upgrade to remove the watermark and unlock unlimited exports."
-            )
+            raise gr.Error(paywall_msg)
 
         # 3) IP cooldown (best-effort anti-incognito)
         ip = get_client_ip(request)
         if ip:
             last = _FREE_IP_LAST.get(ip, 0.0)
             if last and (now - last) < _FREE_COOLDOWN_SECONDS:
-                raise gr.Error(
-                    "Free export already used on this network. "
-                    "Upgrade to unlock unlimited exports."
-                )
+                raise gr.Error(paywall_msg)
 
 
     im = normalize_image(Image.open(image_path))
