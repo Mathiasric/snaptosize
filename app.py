@@ -1,4 +1,5 @@
 import os
+import inspect
 import gradio as gr
 from packaging.version import Version
 
@@ -12,16 +13,23 @@ if __name__ == "__main__":
         server_name="0.0.0.0",
         server_port=port,
         css=(CUSTOM_CSS + "\n" + custom_css),
-        queue=False,  # ✅ IMPORTANT: disable queue endpoints (/queue/join)
     )
+
+    # ✅ Disable queue in a version-safe way (prevents launch() crash)
+    sig = inspect.signature(app.launch)
+    if "enable_queue" in sig.parameters:
+        launch_kwargs["enable_queue"] = False
+    elif "queue" in sig.parameters:
+        launch_kwargs["queue"] = False
 
     # Gradio 6+ uses footer_links instead of show_api
     if Version(gr.__version__) >= Version("6.0.0"):
-        launch_kwargs["footer_links"] = []  # removes api/gradio/settings
+        launch_kwargs["footer_links"] = []
     else:
         launch_kwargs["show_api"] = False
 
     app.launch(**launch_kwargs)
+
 
 
 
