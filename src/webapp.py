@@ -11,7 +11,6 @@ import time
 from PIL import Image, ImageOps, ImageDraw, ImageFont
 import gradio as gr
 
-
 # ---------------------------------------------------------
 # CSS
 # ---------------------------------------------------------
@@ -20,6 +19,13 @@ CSS_PATH = HERE / "theme_clean_2.css"
 CUSTOM_CSS = CSS_PATH.read_text(encoding="utf-8") if CSS_PATH.exists() else ""
 
 print("CSS loaded:", len(CUSTOM_CSS), "from", CSS_PATH)
+
+custom_css = """
+footer { display: none !important; }
+.gradio-container > footer { display: none !important; }
+a[href*="gradio"] { display: none !important; }
+.gradio-container { padding-bottom: 0 !important; margin-bottom: 0 !important; }
+"""
 
 # ---------------------------------------------------------
 # Constants
@@ -595,7 +601,7 @@ def clear_all_groups():
 def render_pro_badge(ok: bool) -> str:
     return "🟣 **Pro active** — unlimited exports enabled." if ok else ""
 
-with gr.Blocks(title=APP_NAME, elem_id="app-root") as app:
+with gr.Blocks(title=APP_NAME, elem_id="app-root", css=custom_css) as app:
     pro_badge = gr.Markdown("", elem_id="pro-badge")
     is_pro = gr.State(False)
 
