@@ -26,6 +26,16 @@ footer, .built-with { display: none !important; }
 .gradio-container > footer { display: none !important; }
 a[href*="gradio"] { display: none !important; }
 .gradio-container { padding-bottom: 0 !important; margin-bottom: 0 !important; }
+
+/* --- FIX Gradio image preview scaling (safe) --- */
+.gradio-container .gradio-image img,
+.gradio-container .gradio-image canvas {
+  width: auto !important;
+  height: auto !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  object-fit: contain !important;
+}
 """
 
 # ---------------------------------------------------------
