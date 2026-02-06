@@ -1,5 +1,6 @@
 gradio
 pillow==11.1.0
+requests
 pillow-heif==1.1.1
 stripe==10.12.0
 tqdm

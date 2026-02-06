@@ -1,4 +1,4 @@
-app = "snaptosize-runner"
+app = "snaptosize-runner2"
 primary_region = "ams"
 
 [build]
@@ -10,8 +10,8 @@ primary_region = "ams"
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_start_machines = true
   auto_stop_machines = "suspend"
+  auto_start_machines = true
   min_machines_running = 0
   processes = ["app"]
 
@@ -19,5 +19,6 @@ primary_region = "ams"
   app = "uvicorn main:app --host 0.0.0.0 --port 8080"
 
 [[vm]]
-  size = "shared-cpu-1x"
-  memory = "2gb"
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 2048

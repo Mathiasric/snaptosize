@@ -1,8 +1,10 @@
+import json
 import os
 import tempfile
 import zipfile
 from pathlib import Path
 from datetime import datetime
+import requests
 
 import stripe
 import time
@@ -49,6 +51,9 @@ MAX_ZIP_SIZE_BYTES = MAX_ZIP_SIZE_MB * 1024 * 1024
 APP_NAME = "SnapToSize"
 PPI = 300  # 300 DPI/PPI export for print
 
+WORKER_BASE = "https://worker.snaptosize-mathias.workers.dev"
+print("### RUNNING src/webapp.py ###", WORKER_BASE)
+
 # ---------------------------------------------------------
 # Paywall (Stripe = source of truth)
 # ---------------------------------------------------------
@@ -57,7 +62,8 @@ STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "").strip()
 STRIPE_LINK_YEARLY = os.getenv("STRIPE_LINK_YEARLY", "").strip()
 
 if not STRIPE_SECRET_KEY:
-    raise RuntimeError("STRIPE_SECRET_KEY is not set. Add it as an environment variable.")
+    print("⚠️ STRIPE_SECRET_KEY not set. Running in DEV mode (Pro unlock disabled).")
+    STRIPE_SECRET_KEY = "dev"
 
 stripe.api_key = STRIPE_SECRET_KEY
 
@@ -594,6 +600,75 @@ def clear_all_groups():
 
 
 # ---------------------------------------------------------
+# New Engine (Async) - Worker pipeline
+# ---------------------------------------------------------
+ASYNC_PRESETS = ["thumb_1024", "etsy_3000px", "etsy_6000px"]
+
+
+def enqueue_job(image_url: str, presets: list) -> str:
+    url = f"{WORKER_BASE}/enqueue"
+    payload = {
+        "image_url": (image_url or "").strip(),
+        "presets": presets or ASYNC_PRESETS,
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json,text/plain,*/*",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0 Safari/537.36",
+        "Origin": "http://localhost:7860",
+        "Referer": "http://localhost:7860/",
+    }
+    r = requests.post(url, json=payload, headers=headers, timeout=20)
+    if r.status_code != 200:
+        raise gr.Error(f"ENQUEUE HTTP {r.status_code}: {r.text[:200]}")
+    return r.json()["job_id"]
+
+
+def poll_status(job_id: str, timeout_s: int = 90) -> dict:
+    start = time.time()
+    headers = {
+        "Accept": "application/json,text/plain,*/*",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0 Safari/537.36",
+    }
+    while time.time() - start < timeout_s:
+        url = f"{WORKER_BASE}/status/{job_id}"
+        r = requests.get(url, headers=headers, timeout=20)
+        if r.status_code != 200:
+            raise gr.Error(f"STATUS HTTP {r.status_code}: {r.text[:200]}")
+        data = r.json()
+        if data.get("status") == "done":
+            return data
+        if data.get("status") == "error":
+            raise gr.Error(f"Job error: {data}")
+        time.sleep(1)
+    raise gr.Error("Timed out waiting for job")
+
+
+def generate_async(image_url: str, presets: list) -> str:
+    job_id = enqueue_job(image_url, presets)
+    data = poll_status(job_id)
+    result = data.get("result", data)
+    presets_list = result.get("presets", [])
+    lines = [f"**job_id:** `{job_id}`", f"**status:** done", ""]
+    download_url = data.get("download_url")
+    if download_url:
+        lines.append(f"**[Download ZIP]({download_url})**")
+        lines.append("")
+    if presets_list:
+        lines.append("| name | width × height | jpeg_bytes | MB |")
+        lines.append("|------|----------------|------------|-----|")
+        for p in presets_list:
+            w = p.get("width", 0)
+            h = p.get("height", 0)
+            jb = p.get("jpeg_bytes", 0)
+            mb = f"{jb / 1024 / 1024:.2f}"
+            lines.append(f"| {p.get('name', '')} | {w} × {h} | {jb} | {mb} |")
+    else:
+        lines.append("_No presets in result._")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------
 # UI
 # ---------------------------------------------------------
 def render_pro_badge(ok: bool) -> str:
@@ -768,6 +843,30 @@ Paste the email you used at checkout and click **Unlock Pro**.
             queue=False,
         )
 
+    # ==================== NEW ENGINE (ASYNC) ====================
+    with gr.Tab("New Engine (Async)", elem_id="tab-async"):
+        gr.Markdown(
+            "_Async pipeline: image_url → Worker → Runner → preset metadata._",
+            elem_classes=["tab-description"],
+        )
+        async_image_url = gr.Textbox(
+            label="Image URL",
+            placeholder="https://example.com/image.jpg",
+            elem_id="async-image-url",
+        )
+        async_presets = gr.CheckboxGroup(
+            ASYNC_PRESETS,
+            value=ASYNC_PRESETS,
+            label="Presets",
+            elem_id="async-presets",
+        )
+        async_btn = gr.Button("Generate (Async)", elem_id="async-generate-btn")
+        async_out = gr.Markdown("", elem_id="async-output")
+        async_btn.click(
+            fn=generate_async,
+            inputs=[async_image_url, async_presets],
+            outputs=async_out,
+        )
 
     # ==================== SINGLE EXPORT (ADVANCED) ====================
     with gr.Tab("Single Size Export (Advanced)", elem_id="tab-single-export"):
